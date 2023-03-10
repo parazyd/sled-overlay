@@ -16,8 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-//! Simulate the creation of a [`SledTreeOverlay`] on top of a single
-//! [`sled::Tree`] instance, and perfor writes to verify overlay's cache
+//! Simulate the creation of two [`SledTreeOverlay`] on top of two
+//! [`sled::Tree`] instances, and perform writes to verify overlay's cache
 //! functionality.
 
 use sled::{transaction::ConflictableTransactionError, Config, Transactional};
@@ -93,6 +93,6 @@ fn sled_tree_overlay() -> Result<(), sled::Error> {
     assert_eq!(tree_2.get(b"key_d")?, Some(b"val_d".into()));
     assert_eq!(tree_2.get(b"key_e")?, Some(b"val_e".into()));
     assert_eq!(tree_2.get(b"key_f")?, Some(b"val_f".into()));
-    
+
     Ok(())
 }
