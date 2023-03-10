@@ -257,9 +257,9 @@ impl SledDbOverlay {
         cache.remove(key)
     }
 
-    /// Aggregate all the current overlay changes into a [`sled::Batch`] ready for
-    /// further operation. Corresponding ['sled::Tree'] is also returned, enforcing
-    /// the order of execution. If there are no changes, both vectors will be empty.
+    /// Aggregate all the current overlay changes into [`sled::Batch`] instances and
+    /// return vectors of [`sled::Tree`] and their respective [`sled::Batch`] that can
+    /// be used for further operations. If there are no changes, both vectors will be empty.
     pub fn aggregate(&self) -> Result<(Vec<sled::Tree>, Vec<sled::Batch>), sled::Error> {
         let mut trees = vec![];
         let mut batches = vec![];
