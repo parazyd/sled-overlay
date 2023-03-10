@@ -257,19 +257,31 @@ impl SledDbOverlay {
         cache.remove(key)
     }
 
-    /// Atomically apply all batches on all trees as a transaction.
-    /// This function **does not** perform a db flush. This should be done externally,
-    /// since then there is a choice to perform either blocking or async IO.
-    pub fn apply(&self) -> Result<(), TransactionError<sled::Error>> {
+    /// Aggregate all the current overlay changes into a [`sled::Batch`] ready for
+    /// further operation. Corresponding ['sled::Tree'] is also returned, enforcing
+    /// the order of execution. If there are no changes, both vectors will be empty.
+    pub fn aggregate(&self) -> Result<(Vec<sled::Tree>, Vec<sled::Batch>), sled::Error> {
         let mut trees = vec![];
         let mut batches = vec![];
 
         for (key, tree) in &self.trees {
             let cache = self.get_cache(key)?;
             if let Some(batch) = cache.aggregate() {
-                trees.push(tree);
+                trees.push(tree.clone());
                 batches.push(batch);
             }
+        }
+
+        Ok((trees, batches))
+    }
+
+    /// Atomically apply all batches on all trees as a transaction.
+    /// This function **does not** perform a db flush. This should be done externally,
+    /// since then there is a choice to perform either blocking or async IO.
+    pub fn apply(&self) -> Result<(), TransactionError<sled::Error>> {
+        let (trees, batches) = self.aggregate()?;
+        if trees.is_empty() {
+            return Ok(());
         }
 
         // Perform an atomic transaction over all the collected trees and
