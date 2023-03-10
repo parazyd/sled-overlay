@@ -17,21 +17,22 @@
  */
 
 //! sled-overlay is a small crate that serves as tooling to have intermediate
-//! writes to some sled database. With it, we're able to write data into a
-//! cache, and only flush to the actual sled trees after we decide that
-//! everything in some batch was executed correctly.
+//! writes to some sled database. With it, we're able to write data into an
+//! in-memory cache, and only flush to the actual sled trees after we decide
+//! that everything in some batch was executed correctly.
 //! This gives some minimal infrastructure to be able to transparently have
 //! rollback-like functionality.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use sled::IVec;
+use sled::transaction::{ConflictableTransactionError, TransactionError};
+use sled::{IVec, Transactional};
 
 /// An overlay on top of a single [`sled::Tree`] instance
 pub struct SledTreeOverlay {
-    /// The [`sled::Tree`] that is being overlaid
+    /// The [`sled::Tree`] that is being overlayed.
     tree: sled::Tree,
-    /// The cache is the actual overlayed data represented as a [`BTreeMap`]
+    /// The cache is the actual overlayed data represented as a [`BTreeMap`].
     cache: BTreeMap<IVec, IVec>,
     /// In `removed`, we keep track of keys that were removed in the overlay.
     removed: BTreeSet<IVec>,
@@ -141,5 +142,107 @@ impl SledTreeOverlay {
         }
 
         Some(batch)
+    }
+}
+
+/// An overlay on top of an entire [`sled::Db`] which can span multiple trees
+pub struct SledDbOverlay {
+    /// The [`sled::Db`] that is being overlayed.
+    db: sled::Db,
+    /// Existing trees in `db` at the time of instantiation, so we can track newly opened trees.
+    initial_tree_names: Vec<IVec>,
+    /// New trees that have been opened, but didn't exist in `db` before.
+    new_tree_names: Vec<IVec>,
+    /// Pointers to sled trees that we have opened.
+    trees: BTreeMap<IVec, sled::Tree>,
+    /// Pointers to [`SledTreeOverlay`] instances that have been created.
+    caches: BTreeMap<IVec, SledTreeOverlay>,
+}
+
+impl SledDbOverlay {
+    /// Instantiate a new [`SledDbOverlay`] on top of a given [`sled::Db`].
+    pub fn new(db: &sled::Db) -> Self {
+        Self {
+            db: db.clone(),
+            initial_tree_names: db.tree_names(),
+            new_tree_names: vec![],
+            trees: BTreeMap::new(),
+            caches: BTreeMap::new(),
+        }
+    }
+
+    /// Create a new [`SledTreeOverlay`] on top of a given `tree_name`.
+    /// This function will also open a new tree inside `db` regardless of if it has
+    /// existed before, so for convenience, we also provide [`SledDbOverlay::purge_new_trees`]
+    /// in case we decide we don't want to write the batches, and drop the new trees.
+    pub fn open_tree(&mut self, tree_name: &str) -> Result<(), sled::Error> {
+        let tree_key: IVec = tree_name.into();
+
+        if self.trees.contains_key(&tree_key) {
+            // We have already opened this tree.
+            return Ok(());
+        }
+
+        // Open this tree in sled. In case it hasn't existed before, we also need
+        // to track it in `self.new_tree_names`.
+        let tree = self.db.open_tree(&tree_key)?;
+        let cache = SledTreeOverlay::new(&tree);
+
+        if !self.initial_tree_names.contains(&tree_key) {
+            self.new_tree_names.push(tree_key.clone());
+        }
+
+        self.trees.insert(tree_key.clone(), tree);
+        self.caches.insert(tree_key, cache);
+
+        Ok(())
+    }
+
+    /// Drop newly created trees from the sled database. This is a convenience
+    /// function that should be used when we decide that we don't want to apply
+    /// any cache changes, and we want to revert back to the initial state.
+    pub fn purge_new_trees(&self) -> Result<(), sled::Error> {
+        for i in &self.new_tree_names {
+            self.db.drop_tree(i)?;
+        }
+
+        Ok(())
+    }
+
+    /// Fetch the cache for a given tree.
+    fn get_cache(&self, tree_key: &IVec) -> Result<&SledTreeOverlay, sled::Error> {
+        if let Some(v) = self.caches.get(tree_key) {
+            return Ok(v);
+        }
+
+        Err(sled::Error::CollectionNotFound(tree_key.into()))
+    }
+
+    /// Atomically apply all batches on all trees as a transaction.
+    /// This function **does not** perform a db flush. This should be done externally,
+    /// since then there is a choice to perform either blocking or async IO.
+    pub fn apply(&self) -> Result<(), TransactionError<sled::Error>> {
+        let mut trees = vec![];
+        let mut batches = vec![];
+
+        for (key, tree) in &self.trees {
+            let cache = self.get_cache(key)?;
+            if let Some(batch) = cache.aggregate() {
+                trees.push(tree);
+                batches.push(batch);
+            }
+        }
+
+        // Perform an atomic transaction over all the collected trees and
+        // apply the batches.
+        trees.transaction(|trees| {
+            for (index, tree) in trees.iter().enumerate() {
+                tree.apply_batch(&batches[index])?;
+            }
+
+            Ok::<(), ConflictableTransactionError<sled::Error>>(())
+        })?;
+
+        Ok(())
     }
 }
