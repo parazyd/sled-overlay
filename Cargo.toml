@@ -1,6 +1,8 @@
 [package]
 name = "sled-overlay"
 version = "0.0.1"
+description = "Overlay mechanism for sled"
+repository = "https://github.com/parazyd/sled-overlay"
 authors = ["Dyne.org foundation <foundation@dyne.org>"]
 license = "AGPL-3.0-only"
 edition = "2021"
