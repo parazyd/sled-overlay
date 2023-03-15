@@ -175,7 +175,7 @@ impl SledDbOverlay {
     /// This function will also open a new tree inside `db` regardless of if it has
     /// existed before, so for convenience, we also provide [`SledDbOverlay::purge_new_trees`]
     /// in case we decide we don't want to write the batches, and drop the new trees.
-    pub fn open_tree(&mut self, tree_name: &str) -> Result<(), sled::Error> {
+    pub fn open_tree(&mut self, tree_name: &[u8]) -> Result<(), sled::Error> {
         let tree_key: IVec = tree_name.into();
 
         if self.trees.contains_key(&tree_key) {
@@ -228,13 +228,13 @@ impl SledDbOverlay {
 
     /// Returns `true` if the overlay contains a value for a specified key in the specified
     /// tree cache.
-    pub fn contains_key(&self, tree_key: &str, key: &[u8]) -> Result<bool, sled::Error> {
+    pub fn contains_key(&self, tree_key: &[u8], key: &[u8]) -> Result<bool, sled::Error> {
         let cache = self.get_cache(&tree_key.into())?;
         cache.contains_key(key)
     }
 
     /// Retrieve a value from the overlay if it exists in the specified tree cache.
-    pub fn get(&self, tree_key: &str, key: &[u8]) -> Result<Option<IVec>, sled::Error> {
+    pub fn get(&self, tree_key: &[u8], key: &[u8]) -> Result<Option<IVec>, sled::Error> {
         let cache = self.get_cache(&tree_key.into())?;
         cache.get(key)
     }
@@ -243,7 +243,7 @@ impl SledDbOverlay {
     /// if it was set.
     pub fn insert(
         &mut self,
-        tree_key: &str,
+        tree_key: &[u8],
         key: &[u8],
         value: &[u8],
     ) -> Result<Option<IVec>, sled::Error> {
@@ -252,7 +252,7 @@ impl SledDbOverlay {
     }
 
     /// Delete a value in the specified tree cache, returning the old value if it existed.
-    pub fn remove(&mut self, tree_key: &str, key: &[u8]) -> Result<Option<IVec>, sled::Error> {
+    pub fn remove(&mut self, tree_key: &[u8], key: &[u8]) -> Result<Option<IVec>, sled::Error> {
         let cache = self.get_cache_mut(&tree_key.into())?;
         cache.remove(key)
     }

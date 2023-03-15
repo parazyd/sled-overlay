@@ -25,7 +25,7 @@ use sled::Config;
 
 use sled_overlay::SledDbOverlay;
 
-const TREE: &str = "_tree";
+const TREE: &[u8] = b"_tree";
 
 #[test]
 fn new_tree_remove() -> Result<(), sled::Error> {

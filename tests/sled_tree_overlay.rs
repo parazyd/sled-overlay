@@ -24,8 +24,8 @@ use sled::{transaction::ConflictableTransactionError, Config, Transactional};
 
 use sled_overlay::SledTreeOverlay;
 
-const TREE_1: &str = "_tree1";
-const TREE_2: &str = "_tree2";
+const TREE_1: &[u8] = b"_tree1";
+const TREE_2: &[u8] = b"_tree2";
 
 #[test]
 fn sled_tree_overlay() -> Result<(), sled::Error> {
