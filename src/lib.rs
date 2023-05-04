@@ -278,7 +278,14 @@ impl SledDbOverlay {
     /// Atomically apply all batches on all trees as a transaction.
     /// This function **does not** perform a db flush. This should be done externally,
     /// since then there is a choice to perform either blocking or async IO.
-    pub fn apply(&self) -> Result<(), TransactionError<sled::Error>> {
+    pub fn apply(&mut self) -> Result<(), TransactionError<sled::Error>> {
+        // Ensure new trees exist
+        for tree_key in &self.new_tree_names {
+            let tree = self.db.open_tree(tree_key)?;
+            self.trees.insert(tree_key.clone(), tree);
+        }
+
+        // Aggregate batches
         let (trees, batches) = self.aggregate()?;
         if trees.is_empty() {
             return Ok(());
