@@ -71,7 +71,7 @@ fn sled_db_overlay() -> Result<(), sled::Error> {
     assert_eq!(tree_2.get(b"key_e")?, None);
     assert_eq!(tree_2.get(b"key_f")?, None);
 
-    // Now execute all tree baches in the overlay
+    // Now execute all tree batches in the overlay
     assert_eq!(overlay.apply(), Ok(()));
 
     // Don't forget to flush

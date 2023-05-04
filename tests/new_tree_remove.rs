@@ -111,7 +111,7 @@ fn new_tree_remove_multiple_overlays() -> Result<(), sled::Error> {
     // in overlay0
     assert_eq!(overlay0.purge_new_trees(), Ok(()));
 
-    // Now execute all tree baches in the overlay1
+    // Now execute all tree batches in the overlay1
     assert_eq!(overlay1.apply(), Ok(()));
 
     // Don't forget to flush
