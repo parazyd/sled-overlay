@@ -275,7 +275,8 @@ impl SledDbOverlay {
         Ok((trees, batches))
     }
 
-    /// Atomically apply all batches on all trees as a transaction.
+    /// Ensure all new trees that have been opened exist in sled by reopening them,
+    /// and atomically apply all batches on all trees as a transaction.
     /// This function **does not** perform a db flush. This should be done externally,
     /// since then there is a choice to perform either blocking or async IO.
     pub fn apply(&mut self) -> Result<(), TransactionError<sled::Error>> {
