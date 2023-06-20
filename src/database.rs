@@ -209,7 +209,7 @@ impl SledDbOverlay {
 
     /// Revert to current cache state checkpoint.
     pub fn revert_to_checkpoint(&mut self) -> Result<(), sled::Error> {
-        // We first check if any new trees where opened, so we can remove them.
+        // We first check if any new trees were opened, so we can remove them.
         let new_trees: Vec<_> = self
             .state
             .new_tree_names
