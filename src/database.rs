@@ -23,12 +23,9 @@ use sled::{IVec, Transactional};
 
 use crate::SledTreeOverlay;
 
-/// An overlay on top of an entire [`sled::Db`] which can span multiple trees
-pub struct SledDbOverlay {
-    /// The [`sled::Db`] that is being overlayed.
-    db: sled::Db,
-    /// Existing trees in `db` at the time of instantiation, so we can track newly opened trees.
-    initial_tree_names: Vec<IVec>,
+/// Struct representing [`SledDbOverlay`] cache state
+#[derive(Clone)]
+pub struct SledDbOverlayState {
     /// New trees that have been opened, but didn't exist in `db` before.
     new_tree_names: Vec<IVec>,
     /// Pointers to sled trees that we have opened.
@@ -37,15 +34,37 @@ pub struct SledDbOverlay {
     caches: BTreeMap<IVec, SledTreeOverlay>,
 }
 
+impl SledDbOverlayState {
+    /// Instantiate a new [`SledDbOverlayState`].
+    pub fn new() -> Self {
+        Self {
+            new_tree_names: vec![],
+            trees: BTreeMap::new(),
+            caches: BTreeMap::new(),
+        }
+    }
+}
+
+/// An overlay on top of an entire [`sled::Db`] which can span multiple trees
+pub struct SledDbOverlay {
+    /// The [`sled::Db`] that is being overlayed.
+    db: sled::Db,
+    /// Existing trees in `db` at the time of instantiation, so we can track newly opened trees.
+    initial_tree_names: Vec<IVec>,
+    /// Current overlay cache state
+    state: SledDbOverlayState,
+    /// Checkpointed cache state to revert to
+    checkpoint: SledDbOverlayState,
+}
+
 impl SledDbOverlay {
     /// Instantiate a new [`SledDbOverlay`] on top of a given [`sled::Db`].
     pub fn new(db: &sled::Db) -> Self {
         Self {
             db: db.clone(),
             initial_tree_names: db.tree_names(),
-            new_tree_names: vec![],
-            trees: BTreeMap::new(),
-            caches: BTreeMap::new(),
+            state: SledDbOverlayState::new(),
+            checkpoint: SledDbOverlayState::new(),
         }
     }
 
@@ -56,7 +75,7 @@ impl SledDbOverlay {
     pub fn open_tree(&mut self, tree_name: &[u8]) -> Result<(), sled::Error> {
         let tree_key: IVec = tree_name.into();
 
-        if self.trees.contains_key(&tree_key) {
+        if self.state.trees.contains_key(&tree_key) {
             // We have already opened this tree.
             return Ok(());
         }
@@ -67,11 +86,11 @@ impl SledDbOverlay {
         let cache = SledTreeOverlay::new(&tree);
 
         if !self.initial_tree_names.contains(&tree_key) {
-            self.new_tree_names.push(tree_key.clone());
+            self.state.new_tree_names.push(tree_key.clone());
         }
 
-        self.trees.insert(tree_key.clone(), tree);
-        self.caches.insert(tree_key, cache);
+        self.state.trees.insert(tree_key.clone(), tree);
+        self.state.caches.insert(tree_key, cache);
 
         Ok(())
     }
@@ -80,7 +99,7 @@ impl SledDbOverlay {
     /// function that should be used when we decide that we don't want to apply
     /// any cache changes, and we want to revert back to the initial state.
     pub fn purge_new_trees(&self) -> Result<(), sled::Error> {
-        for i in &self.new_tree_names {
+        for i in &self.state.new_tree_names {
             self.db.drop_tree(i)?;
         }
 
@@ -89,7 +108,7 @@ impl SledDbOverlay {
 
     /// Fetch the cache for a given tree.
     fn get_cache(&self, tree_key: &IVec) -> Result<&SledTreeOverlay, sled::Error> {
-        if let Some(v) = self.caches.get(tree_key) {
+        if let Some(v) = self.state.caches.get(tree_key) {
             return Ok(v);
         }
 
@@ -98,7 +117,7 @@ impl SledDbOverlay {
 
     /// Fetch a mutable reference to the cache for a given tree.
     fn get_cache_mut(&mut self, tree_key: &IVec) -> Result<&mut SledTreeOverlay, sled::Error> {
-        if let Some(v) = self.caches.get_mut(tree_key) {
+        if let Some(v) = self.state.caches.get_mut(tree_key) {
             return Ok(v);
         }
         Err(sled::Error::CollectionNotFound(tree_key.clone()))
@@ -142,7 +161,7 @@ impl SledDbOverlay {
         let mut trees = vec![];
         let mut batches = vec![];
 
-        for (key, tree) in &self.trees {
+        for (key, tree) in &self.state.trees {
             let cache = self.get_cache(key)?;
             if let Some(batch) = cache.aggregate() {
                 trees.push(tree.clone());
@@ -159,9 +178,9 @@ impl SledDbOverlay {
     /// since then there is a choice to perform either blocking or async IO.
     pub fn apply(&mut self) -> Result<(), TransactionError<sled::Error>> {
         // Ensure new trees exist
-        for tree_key in &self.new_tree_names {
+        for tree_key in &self.state.new_tree_names {
             let tree = self.db.open_tree(tree_key)?;
-            self.trees.insert(tree_key.clone(), tree);
+            self.state.trees.insert(tree_key.clone(), tree);
         }
 
         // Aggregate batches
@@ -179,6 +198,29 @@ impl SledDbOverlay {
 
             Ok::<(), ConflictableTransactionError<sled::Error>>(())
         })?;
+
+        Ok(())
+    }
+
+    /// Checkpoint current cache state so we can revert to it, if needed.
+    pub fn checkpoint(&mut self) {
+        self.checkpoint = self.state.clone();
+    }
+
+    /// Revert to current cache state checkpoint.
+    pub fn revert_to_checkpoint(&mut self) -> Result<(), sled::Error> {
+        // We first check if any new trees where opened, so we can remove them.
+        let new_trees: Vec<_> = self
+            .state
+            .new_tree_names
+            .iter()
+            .filter(|tree| !self.checkpoint.new_tree_names.contains(tree))
+            .collect();
+        for tree in &new_trees {
+            self.db.drop_tree(tree)?;
+        }
+
+        self.state = self.checkpoint.clone();
 
         Ok(())
     }

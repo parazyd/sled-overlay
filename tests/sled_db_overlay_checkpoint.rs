@@ -16,35 +16,41 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-//! Simulate the creation of a [`SledTreeOverlay`] on top of a
-//! [`sled::Tree`] instance, and perform checkpoints and
-//! writes to verify overlay's cache checkpoint functionality.
+//! Simulate the creation of a [`SledDbOverlay`] on top of an entire
+//! [`sled::Db`] instance, and perform checkpoints and writes to verify
+//! overlay's cache checkpoint functionality.
 
 use sled::Config;
 
-use sled_overlay::SledTreeOverlay;
+use sled_overlay::SledDbOverlay;
 
 const TREE: &[u8] = b"_tree";
+const NEW_TREE: &[u8] = b"_new_tree";
 
 #[test]
-fn sled_tree_overlay_checkpoint() -> Result<(), sled::Error> {
+fn sled_db_overlay_checkpoint() -> Result<(), sled::Error> {
     // Initialize database
     let config = Config::new().temporary(true);
     let db = config.open()?;
 
-    // Initialize tree and its overlay
+    // Initialize overlay
+    let mut overlay = SledDbOverlay::new(&db);
+
+    // Open tree in the overlay
+    overlay.open_tree(TREE)?;
+
+    // We keep seperate trees for validation
     let tree = db.open_tree(TREE)?;
-    let mut overlay = SledTreeOverlay::new(&tree);
 
     // Insert some values to the overlay
-    overlay.insert(b"key_a", b"val_a")?;
-    overlay.insert(b"key_b", b"val_b")?;
-    overlay.insert(b"key_c", b"val_c")?;
+    overlay.insert(TREE, b"key_a", b"val_a")?;
+    overlay.insert(TREE, b"key_b", b"val_b")?;
+    overlay.insert(TREE, b"key_c", b"val_c")?;
 
     // Verify they are in the overlay
-    assert_eq!(overlay.get(b"key_a")?, Some(b"val_a".into()));
-    assert_eq!(overlay.get(b"key_b")?, Some(b"val_b".into()));
-    assert_eq!(overlay.get(b"key_c")?, Some(b"val_c".into()));
+    assert_eq!(overlay.get(TREE, b"key_a")?, Some(b"val_a".into()));
+    assert_eq!(overlay.get(TREE, b"key_b")?, Some(b"val_b".into()));
+    assert_eq!(overlay.get(TREE, b"key_c")?, Some(b"val_c".into()));
 
     // Verify they are not in sled
     assert_eq!(tree.get(b"key_a")?, None);
@@ -55,28 +61,30 @@ fn sled_tree_overlay_checkpoint() -> Result<(), sled::Error> {
     overlay.checkpoint();
 
     // We add some more values to the overlay
-    overlay.insert(b"key_d", b"val_d")?;
-    overlay.insert(b"key_e", b"val_e")?;
-    overlay.insert(b"key_f", b"val_f")?;
+    overlay.insert(TREE, b"key_d", b"val_d")?;
+    overlay.insert(TREE, b"key_e", b"val_e")?;
+    overlay.insert(TREE, b"key_f", b"val_f")?;
 
     // Verify they are in the overlay
-    assert_eq!(overlay.get(b"key_d")?, Some(b"val_d".into()));
-    assert_eq!(overlay.get(b"key_e")?, Some(b"val_e".into()));
-    assert_eq!(overlay.get(b"key_f")?, Some(b"val_f".into()));
+    assert_eq!(overlay.get(TREE, b"key_d")?, Some(b"val_d".into()));
+    assert_eq!(overlay.get(TREE, b"key_e")?, Some(b"val_e".into()));
+    assert_eq!(overlay.get(TREE, b"key_f")?, Some(b"val_f".into()));
 
     // Verify they are not in sled
     assert_eq!(tree.get(b"key_d")?, None);
     assert_eq!(tree.get(b"key_e")?, None);
     assert_eq!(tree.get(b"key_f")?, None);
 
+    // We also create a new tree
+    overlay.open_tree(NEW_TREE)?;
+
     // We assume something went wrong, so we revert to last checkpoint
-    overlay.revert_to_checkpoint();
+    overlay.revert_to_checkpoint()?;
 
-    // Aggregate the batch for writing
-    let batch = overlay.aggregate().unwrap();
+    // Now execute all tree batches in the overlay
+    assert_eq!(overlay.apply(), Ok(()));
 
-    // Now we write it to sled
-    tree.apply_batch(batch)?;
+    // Don't forget to flush
     db.flush()?;
 
     // Verify sled contains pre-checkpoint keys
@@ -88,6 +96,10 @@ fn sled_tree_overlay_checkpoint() -> Result<(), sled::Error> {
     assert_eq!(tree.get(b"key_d")?, None);
     assert_eq!(tree.get(b"key_e")?, None);
     assert_eq!(tree.get(b"key_f")?, None);
+
+    // Verify sled doesn't contain the new tree we created
+    // after checkpoint
+    assert!(!db.tree_names().contains(&NEW_TREE.into()));
 
     Ok(())
 }

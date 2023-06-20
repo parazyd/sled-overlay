@@ -40,6 +40,7 @@ impl SledTreeOverlayState {
 }
 
 /// An overlay on top of a single [`sled::Tree`] instance
+#[derive(Clone)]
 pub struct SledTreeOverlay {
     /// The [`sled::Tree`] that is being overlayed.
     tree: sled::Tree,
