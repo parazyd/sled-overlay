@@ -78,16 +78,16 @@ impl SledTreeOverlay {
     /// Returns `true` if the overlay is empty.
     pub fn is_empty(&self) -> bool {
         // Keep a counter of all elements
-        let mut counter = 0;
+        let mut counter: i64 = 0;
 
         // Add existing keys
-        counter += self.tree.len();
+        counter += self.tree.len() as i64;
 
         // Add new keys
-        counter += self.state.cache.len();
+        counter += self.state.cache.len() as i64;
 
         // Subtract removed keys
-        counter -= self.state.removed.len();
+        counter -= self.state.removed.len() as i64;
 
         counter <= 0
     }
