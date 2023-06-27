@@ -48,6 +48,12 @@ impl SledDbOverlayState {
     }
 }
 
+impl Default for SledDbOverlayState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// An overlay on top of an entire [`sled::Db`] which can span multiple trees
 pub struct SledDbOverlay {
     /// The [`sled::Db`] that is being overlayed.
@@ -145,7 +151,7 @@ impl SledDbOverlay {
 
     /// Fetch the cache for a given tree.
     fn get_cache(&self, tree_key: &IVec) -> Result<&SledTreeOverlay, sled::Error> {
-        if self.state.dropped_tree_names.contains(&tree_key) {
+        if self.state.dropped_tree_names.contains(tree_key) {
             return Err(sled::Error::CollectionNotFound(tree_key.into()));
         }
 
@@ -158,7 +164,7 @@ impl SledDbOverlay {
 
     /// Fetch a mutable reference to the cache for a given tree.
     fn get_cache_mut(&mut self, tree_key: &IVec) -> Result<&mut SledTreeOverlay, sled::Error> {
-        if self.state.dropped_tree_names.contains(&tree_key) {
+        if self.state.dropped_tree_names.contains(tree_key) {
             return Err(sled::Error::CollectionNotFound(tree_key.into()));
         }
 

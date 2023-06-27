@@ -39,6 +39,12 @@ impl SledTreeOverlayState {
     }
 }
 
+impl Default for SledTreeOverlayState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// An overlay on top of a single [`sled::Tree`] instance
 #[derive(Clone)]
 pub struct SledTreeOverlay {
