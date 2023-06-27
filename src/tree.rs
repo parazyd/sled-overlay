@@ -98,6 +98,18 @@ impl SledTreeOverlay {
         counter <= 0
     }
 
+    /// Returns last value from the overlay or `None` if its empty,
+    /// based on the `Ord` implementation for `Vec<u8>`.
+    pub fn last(&self) -> Result<Option<(IVec, IVec)>, sled::Error> {
+        // First check if cache has keys
+        if let Some(record) = self.state.cache.last_key_value() {
+            return Ok(Some((record.0.clone(), record.1.clone())));
+        }
+
+        // Then the main tree
+        self.tree.last()
+    }
+
     /// Retrieve a value from the overlay if it exists.
     pub fn get(&self, key: &[u8]) -> Result<Option<IVec>, sled::Error> {
         // First check if the key was removed in the overlay

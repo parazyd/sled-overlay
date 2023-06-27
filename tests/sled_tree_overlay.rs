@@ -43,6 +43,10 @@ fn sled_tree_overlay() -> Result<(), sled::Error> {
     assert!(overlay_1.is_empty());
     assert!(overlay_2.is_empty());
 
+    // Check last value is `None`
+    assert_eq!(overlay_1.last()?, None);
+    assert_eq!(overlay_1.last()?, None);
+
     // Insert some values to the overlays
     overlay_1.insert(b"key_a", b"val_a")?;
     overlay_1.insert(b"key_b", b"val_b")?;
@@ -64,6 +68,10 @@ fn sled_tree_overlay() -> Result<(), sled::Error> {
     // Check overlays are not empty
     assert!(!overlay_1.is_empty());
     assert!(!overlay_2.is_empty());
+
+    // Check their last values
+    assert_eq!(overlay_1.last()?, Some((b"key_c".into(), b"val_c".into())));
+    assert_eq!(overlay_2.last()?, Some((b"key_f".into(), b"val_f".into())));
 
     // Verify they are not in sled
     assert_eq!(tree_1.get(b"key_a")?, None);
