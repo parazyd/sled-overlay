@@ -222,6 +222,7 @@ impl SledDbOverlay {
     /// trees from sled.
     /// This function **does not** perform a db flush. This should be done externally,
     /// since then there is a choice to perform either blocking or async IO.
+    /// After execution is successful, caller should *NOT* use the overlay again.
     pub fn apply(&mut self) -> Result<(), TransactionError<sled::Error>> {
         // Ensure new trees exist
         for tree_key in &self.state.new_tree_names {
