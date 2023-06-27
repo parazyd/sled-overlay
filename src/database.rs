@@ -32,6 +32,8 @@ pub struct SledDbOverlayState {
     trees: BTreeMap<IVec, sled::Tree>,
     /// Pointers to [`SledTreeOverlay`] instances that have been created.
     caches: BTreeMap<IVec, SledTreeOverlay>,
+    /// Trees that were dropped.
+    dropped_tree_names: Vec<IVec>,
 }
 
 impl SledDbOverlayState {
@@ -41,6 +43,7 @@ impl SledDbOverlayState {
             new_tree_names: vec![],
             trees: BTreeMap::new(),
             caches: BTreeMap::new(),
+            dropped_tree_names: vec![],
         }
     }
 }
@@ -75,6 +78,11 @@ impl SledDbOverlay {
     pub fn open_tree(&mut self, tree_name: &[u8]) -> Result<(), sled::Error> {
         let tree_key: IVec = tree_name.into();
 
+        // We don't allow reopening a dropped tree.
+        if self.state.dropped_tree_names.contains(&tree_key) {
+            return Err(sled::Error::CollectionNotFound(tree_key));
+        }
+
         if self.state.trees.contains_key(&tree_key) {
             // We have already opened this tree.
             return Ok(());
@@ -95,6 +103,35 @@ impl SledDbOverlay {
         Ok(())
     }
 
+    /// Drop a sled tree from the overlay.
+    pub fn drop_tree(&mut self, tree_name: &[u8]) -> Result<(), sled::Error> {
+        let tree_key: IVec = tree_name.into();
+
+        // Check if already removed
+        if self.state.dropped_tree_names.contains(&tree_key) {
+            return Err(sled::Error::CollectionNotFound(tree_key));
+        }
+
+        // Check if its a new tree we created
+        if self.state.new_tree_names.contains(&tree_key) {
+            self.state.trees.remove(&tree_key);
+            self.state.new_tree_names.retain(|x| *x != tree_key);
+            self.state.dropped_tree_names.push(tree_key);
+
+            return Ok(());
+        }
+
+        // Check if tree existed in the database
+        if !self.initial_tree_names.contains(&tree_key) {
+            return Err(sled::Error::CollectionNotFound(tree_key));
+        }
+
+        self.state.trees.remove(&tree_key);
+        self.state.dropped_tree_names.push(tree_key);
+
+        Ok(())
+    }
+
     /// Drop newly created trees from the sled database. This is a convenience
     /// function that should be used when we decide that we don't want to apply
     /// any cache changes, and we want to revert back to the initial state.
@@ -108,6 +145,10 @@ impl SledDbOverlay {
 
     /// Fetch the cache for a given tree.
     fn get_cache(&self, tree_key: &IVec) -> Result<&SledTreeOverlay, sled::Error> {
+        if self.state.dropped_tree_names.contains(&tree_key) {
+            return Err(sled::Error::CollectionNotFound(tree_key.into()));
+        }
+
         if let Some(v) = self.state.caches.get(tree_key) {
             return Ok(v);
         }
@@ -117,6 +158,10 @@ impl SledDbOverlay {
 
     /// Fetch a mutable reference to the cache for a given tree.
     fn get_cache_mut(&mut self, tree_key: &IVec) -> Result<&mut SledTreeOverlay, sled::Error> {
+        if self.state.dropped_tree_names.contains(&tree_key) {
+            return Err(sled::Error::CollectionNotFound(tree_key.into()));
+        }
+
         if let Some(v) = self.state.caches.get_mut(tree_key) {
             return Ok(v);
         }
@@ -157,7 +202,7 @@ impl SledDbOverlay {
     /// Aggregate all the current overlay changes into [`sled::Batch`] instances and
     /// return vectors of [`sled::Tree`] and their respective [`sled::Batch`] that can
     /// be used for further operations. If there are no changes, both vectors will be empty.
-    pub fn aggregate(&self) -> Result<(Vec<sled::Tree>, Vec<sled::Batch>), sled::Error> {
+    fn aggregate(&self) -> Result<(Vec<sled::Tree>, Vec<sled::Batch>), sled::Error> {
         let mut trees = vec![];
         let mut batches = vec![];
 
@@ -173,7 +218,8 @@ impl SledDbOverlay {
     }
 
     /// Ensure all new trees that have been opened exist in sled by reopening them,
-    /// and atomically apply all batches on all trees as a transaction.
+    /// atomically apply all batches on all trees as a transaction, and drop dropped
+    /// trees from sled.
     /// This function **does not** perform a db flush. This should be done externally,
     /// since then there is a choice to perform either blocking or async IO.
     pub fn apply(&mut self) -> Result<(), TransactionError<sled::Error>> {
@@ -181,6 +227,11 @@ impl SledDbOverlay {
         for tree_key in &self.state.new_tree_names {
             let tree = self.db.open_tree(tree_key)?;
             self.state.trees.insert(tree_key.clone(), tree);
+        }
+
+        // Drop removed trees
+        for tree in &self.state.dropped_tree_names {
+            self.db.drop_tree(tree)?;
         }
 
         // Aggregate batches
