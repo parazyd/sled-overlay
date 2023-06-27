@@ -75,6 +75,23 @@ impl SledTreeOverlay {
         Ok(false)
     }
 
+    /// Returns `true` if the overlay is empty.
+    pub fn is_empty(&self) -> bool {
+        // Keep a counter of all elements
+        let mut counter = 0;
+
+        // Add existing keys
+        counter += self.tree.len();
+
+        // Add new keys
+        counter += self.state.cache.len();
+
+        // Subtract removed keys
+        counter -= self.state.removed.len();
+
+        counter <= 0
+    }
+
     /// Retrieve a value from the overlay if it exists.
     pub fn get(&self, key: &[u8]) -> Result<Option<IVec>, sled::Error> {
         // First check if the key was removed in the overlay
@@ -114,15 +131,12 @@ impl SledTreeOverlay {
         Ok(prev)
     }
 
-    /// Delete a value, returning the old value if it existed.
+    /// Delete a value, if it exists, returning the old value.
     pub fn remove(&mut self, key: &[u8]) -> Result<Option<IVec>, sled::Error> {
         // If it was previously removed, we can just return None
         if self.state.removed.contains::<IVec>(&key.into()) {
             return Ok(None);
         }
-
-        // Mark the key as removed
-        self.state.removed.insert(key.into());
 
         // Attempt to remove from cache, and if it wasn't in the cache before,
         // we have to get the previous value from the sled tree:
@@ -130,6 +144,14 @@ impl SledTreeOverlay {
         if prev.is_none() {
             prev = self.tree.get(key)?;
         }
+
+        // Previous value must existed
+        if prev.is_none() {
+            return Err(sled::Error::CollectionNotFound(key.into()));
+        }
+
+        // Mark the key as removed
+        self.state.removed.insert(key.into());
 
         Ok(prev)
     }

@@ -39,6 +39,10 @@ fn sled_tree_overlay() -> Result<(), sled::Error> {
     let mut overlay_1 = SledTreeOverlay::new(&tree_1);
     let mut overlay_2 = SledTreeOverlay::new(&tree_2);
 
+    // Check overlays are empty
+    assert!(overlay_1.is_empty());
+    assert!(overlay_2.is_empty());
+
     // Insert some values to the overlays
     overlay_1.insert(b"key_a", b"val_a")?;
     overlay_1.insert(b"key_b", b"val_b")?;
@@ -56,6 +60,10 @@ fn sled_tree_overlay() -> Result<(), sled::Error> {
     assert_eq!(overlay_2.get(b"key_d")?, Some(b"val_d".into()));
     assert_eq!(overlay_2.get(b"key_e")?, Some(b"val_e".into()));
     assert_eq!(overlay_2.get(b"key_f")?, Some(b"val_f".into()));
+
+    // Check overlays are not empty
+    assert!(!overlay_1.is_empty());
+    assert!(!overlay_2.is_empty());
 
     // Verify they are not in sled
     assert_eq!(tree_1.get(b"key_a")?, None);

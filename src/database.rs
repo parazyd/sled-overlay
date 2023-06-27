@@ -181,6 +181,12 @@ impl SledDbOverlay {
         cache.get(key)
     }
 
+    /// Returns `true` if specified tree cache is empty.
+    pub fn is_empty(&self, tree_key: &[u8]) -> Result<bool, sled::Error> {
+        let cache = self.get_cache(&tree_key.into())?;
+        Ok(cache.is_empty())
+    }
+
     /// Insert a key to a new value in the specified tree cache, returning the last value
     /// if it was set.
     pub fn insert(

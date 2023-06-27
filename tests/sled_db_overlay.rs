@@ -40,6 +40,10 @@ fn sled_db_overlay() -> Result<(), sled::Error> {
     overlay.open_tree(TREE_1)?;
     overlay.open_tree(TREE_2)?;
 
+    // Check overlay trees are empty
+    assert!(overlay.is_empty(TREE_1)?);
+    assert!(overlay.is_empty(TREE_2)?);
+
     // We keep seperate trees for validation
     let tree_1 = db.open_tree(TREE_1)?;
     let tree_2 = db.open_tree(TREE_2)?;
@@ -61,6 +65,10 @@ fn sled_db_overlay() -> Result<(), sled::Error> {
     assert_eq!(overlay.get(TREE_2, b"key_d")?, Some(b"val_d".into()));
     assert_eq!(overlay.get(TREE_2, b"key_e")?, Some(b"val_e".into()));
     assert_eq!(overlay.get(TREE_2, b"key_f")?, Some(b"val_f".into()));
+
+    // Check overlay trees are not empty
+    assert!(!overlay.is_empty(TREE_1)?);
+    assert!(!overlay.is_empty(TREE_2)?);
 
     // Verify they are not in sled
     assert_eq!(tree_1.get(b"key_a")?, None);
