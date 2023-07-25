@@ -55,6 +55,7 @@ impl Default for SledDbOverlayState {
 }
 
 /// An overlay on top of an entire [`sled::Db`] which can span multiple trees
+#[derive(Clone)]
 pub struct SledDbOverlay {
     /// The [`sled::Db`] that is being overlayed.
     db: sled::Db,
