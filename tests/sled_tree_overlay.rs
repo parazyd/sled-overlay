@@ -112,3 +112,56 @@ fn sled_tree_overlay() -> Result<(), sled::Error> {
 
     Ok(())
 }
+
+#[test]
+fn sled_tree_overlay_last() -> Result<(), sled::Error> {
+    // Initialize database
+    let config = Config::new().temporary(true);
+    let db = config.open()?;
+
+    // Initialize tree and its overlay
+    let tree = db.open_tree(TREE_1)?;
+    let mut overlay = SledTreeOverlay::new(&tree);
+    assert!(overlay.is_empty());
+
+    // Check last is None
+    assert_eq!(overlay.last()?, None);
+
+    // Insert a value to the tree
+    tree.insert(b"key_a", b"val_a")?;
+
+    // Check last is the last tree key
+    let last = overlay.last()?.unwrap();
+    assert_eq!(last.0, b"key_a");
+    assert_eq!(last.1, b"val_a");
+
+    // Remove the key from the overlay and check
+    // last is None
+    overlay.remove(b"key_a")?;
+    assert_eq!(overlay.last()?, None);
+
+    // Remove value from the tree
+    tree.remove(b"key_a")?;
+
+    // Insert key in overlay and check its last
+    overlay.insert(b"key_a", b"val_a")?;
+    assert!(tree.is_empty());
+    let last = overlay.last()?.unwrap();
+    assert_eq!(last.0, b"key_a");
+    assert_eq!(last.1, b"val_a");
+
+    // Insert a key in the tree that is supposed to be last
+    tree.insert(b"key_b", b"val_b")?;
+    let last = overlay.last()?.unwrap();
+    assert_eq!(last.0, b"key_b");
+    assert_eq!(last.1, b"val_b");
+
+    // Remove the key from the overlay and check
+    // last is the correct one
+    overlay.remove(b"key_b")?;
+    let last = overlay.last()?.unwrap();
+    assert_eq!(last.0, b"key_a");
+    assert_eq!(last.1, b"val_a");
+
+    Ok(())
+}

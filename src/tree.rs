@@ -101,13 +101,39 @@ impl SledTreeOverlay {
     /// Returns last value from the overlay or `None` if its empty,
     /// based on the `Ord` implementation for `Vec<u8>`.
     pub fn last(&self) -> Result<Option<(IVec, IVec)>, sled::Error> {
-        // First check if cache has keys
-        if let Some(record) = self.state.cache.last_key_value() {
-            return Ok(Some((record.0.clone(), record.1.clone())));
+        // If both main tree and cache are empty, return None
+        if self.tree.is_empty() && self.state.cache.is_empty() {
+            return Ok(None);
         }
 
-        // Then the main tree
-        self.tree.last()
+        // Grab main tree last
+        let tree_last = self.tree.last()?;
+
+        // If cache has no keys and main tree last exists
+        if self.state.cache.is_empty() {
+            if let Some(record) = tree_last {
+                // Return None if its removed
+                if self.state.removed.contains(&record.0) {
+                    return Ok(None);
+                }
+                // Return it
+                return Ok(Some((record.0.clone(), record.1.clone())));
+            }
+        }
+
+        // Grab cache last key
+        let cache_last = self.state.cache.last_key_value().unwrap();
+
+        // Compare the cache last key with the main tree last key,
+        // and return it if its not removed
+        if let Some(tree_last) = tree_last {
+            if cache_last.0 < &tree_last.0 && !self.state.removed.contains(&tree_last.0) {
+                return Ok(Some((tree_last.0.clone(), tree_last.1.clone())));
+            }
+        }
+
+        // Return the cache last key
+        Ok(Some((cache_last.0.clone(), cache_last.1.clone())))
     }
 
     /// Retrieve a value from the overlay if it exists.
