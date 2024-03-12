@@ -24,9 +24,9 @@ use sled::IVec;
 #[derive(Clone)]
 pub struct SledTreeOverlayState {
     /// The cache is the actual overlayed data represented as a [`BTreeMap`].
-    cache: BTreeMap<IVec, IVec>,
+    pub cache: BTreeMap<IVec, IVec>,
     /// In `removed`, we keep track of keys that were removed in the overlay.
-    removed: BTreeSet<IVec>,
+    pub removed: BTreeSet<IVec>,
 }
 
 impl SledTreeOverlayState {
@@ -35,6 +35,79 @@ impl SledTreeOverlayState {
         Self {
             cache: BTreeMap::new(),
             removed: BTreeSet::new(),
+        }
+    }
+
+    /// Aggregate all the current tree overlay state changes into
+    /// a [`sled::Batch`] ready for further operation.
+    /// If there are no changes, return `None`.
+    pub fn aggregate(&self) -> Option<sled::Batch> {
+        if self.cache.is_empty() && self.removed.is_empty() {
+            return None;
+        }
+
+        let mut batch = sled::Batch::default();
+
+        // This kind of first-insert-then-remove operation should be fine
+        // provided it's handled correctly in the above functions.
+        for (k, v) in self.cache.iter() {
+            batch.insert(k, v);
+        }
+
+        for k in self.removed.iter() {
+            batch.remove(k);
+        }
+
+        Some(batch)
+    }
+
+    /// Calculate differences from provided tree overlay state.
+    /// This can be used when we want to keep track of consecutive
+    /// individual changes performed over the current tree overlay
+    /// state. If an entry is in the provided cache but not in our
+    /// own cache, we consider it as removed.
+    pub fn diff(&self, other: &Self) -> Self {
+        let mut diff = self.clone();
+        for (k, v) in other.cache.iter() {
+            // Consider as removed if its not in cache
+            let Some(value) = diff.cache.get(k) else {
+                diff.removed.insert(k.clone());
+                continue;
+            };
+
+            // Check if its value has been modified again
+            if v != value {
+                continue;
+            }
+
+            diff.cache.remove(k);
+        }
+
+        for k in other.removed.iter() {
+            diff.removed.remove(k);
+        }
+
+        diff
+    }
+
+    /// Remove provided tree overlay state changes from our own.
+    pub fn remove_diff(&mut self, other: &Self) {
+        for (k, v) in other.cache.iter() {
+            // Skip if its not in cache
+            let Some(value) = self.cache.get(k) else {
+                continue;
+            };
+
+            // Check if its value has been modified again
+            if v != value {
+                continue;
+            }
+
+            self.cache.remove(k);
+        }
+
+        for k in other.removed.iter() {
+            self.removed.remove(k);
         }
     }
 }
@@ -203,23 +276,7 @@ impl SledTreeOverlay {
     /// Aggregate all the current overlay changes into a [`sled::Batch`] ready for
     /// further operation. If there are no changes, return `None`.
     pub fn aggregate(&self) -> Option<sled::Batch> {
-        if self.state.cache.is_empty() && self.state.removed.is_empty() {
-            return None;
-        }
-
-        let mut batch = sled::Batch::default();
-
-        // This kind of first-insert-then-remove operation should be fine
-        // provided it's handled correctly in the above functions.
-        for (k, v) in self.state.cache.iter() {
-            batch.insert(k, v);
-        }
-
-        for k in self.state.removed.iter() {
-            batch.remove(k);
-        }
-
-        Some(batch)
+        self.state.aggregate()
     }
 
     /// Checkpoint current cache state so we can revert to it, if needed.
@@ -230,5 +287,27 @@ impl SledTreeOverlay {
     /// Revert to current cache state checkpoint.
     pub fn revert_to_checkpoint(&mut self) {
         self.state = self.checkpoint.clone();
+    }
+
+    /// Calculate differences from provided overlay state changes
+    /// sequence. This can be used when we want to keep track of
+    /// consecutive individual changes performed over the current
+    /// overlay state. If the sequence is empty, current state
+    /// is returned as the diff.
+    pub fn diff(&self, sequence: &[SledTreeOverlayState]) -> SledTreeOverlayState {
+        // Grab current state
+        let mut current = self.state.clone();
+
+        // Remove provided diffs sequence
+        for diff in sequence {
+            current.remove_diff(diff);
+        }
+
+        current
+    }
+
+    /// Remove provided tree overlay state changes from our own.
+    pub fn remove_diff(&mut self, other: &SledTreeOverlayState) {
+        self.state.remove_diff(other)
     }
 }
