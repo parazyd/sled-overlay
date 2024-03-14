@@ -171,7 +171,7 @@ impl SledTreeOverlay {
         counter <= 0
     }
 
-    /// Returns last value from the overlay or `None` if its empty,
+    /// Returns last key and value from the overlay or `None` if its empty,
     /// based on the `Ord` implementation for `Vec<u8>`.
     pub fn last(&self) -> Result<Option<(IVec, IVec)>, sled::Error> {
         // If both main tree and cache are empty, return None
@@ -179,33 +179,39 @@ impl SledTreeOverlay {
             return Ok(None);
         }
 
-        // Grab main tree last
+        // Grab main tree last record
         let tree_last = self.tree.last()?;
 
-        // If cache has no keys and main tree last exists
+        // If cache has no records, main tree last exists
         if self.state.cache.is_empty() {
-            if let Some(record) = tree_last {
-                // Return None if its removed
-                if self.state.removed.contains(&record.0) {
-                    return Ok(None);
-                }
-                // Return it
-                return Ok(Some((record.0.clone(), record.1.clone())));
+            // We can safely unwrap here since main tree is not
+            // empty, as we have already checked if both main
+            // tree and cache are empty.
+            let record = tree_last.unwrap();
+
+            // Return None if its removed
+            if self.state.removed.contains(&record.0) {
+                return Ok(None);
             }
+
+            // Return it
+            return Ok(Some((record.0.clone(), record.1.clone())));
         }
 
-        // Grab cache last key
+        // Grab cache last record.
+        // We can safely unwrap here as we checked if the cache is
+        // empty on the previous step.
         let cache_last = self.state.cache.last_key_value().unwrap();
 
-        // Compare the cache last key with the main tree last key,
-        // and return it if its not removed
+        // If the main tree has a last record, compare it with the cache
+        // last record, and return it if it's not removed
         if let Some(tree_last) = tree_last {
             if cache_last.0 < &tree_last.0 && !self.state.removed.contains(&tree_last.0) {
                 return Ok(Some((tree_last.0.clone(), tree_last.1.clone())));
             }
         }
 
-        // Return the cache last key
+        // Return the cache last record
         Ok(Some((cache_last.0.clone(), cache_last.1.clone())))
     }
 
