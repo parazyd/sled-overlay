@@ -26,6 +26,8 @@ use crate::SledTreeOverlay;
 /// Struct representing [`SledDbOverlay`] cache state
 #[derive(Clone)]
 pub struct SledDbOverlayState {
+    /// Existing trees in `db` at the time of instantiation, so we can track newly opened trees.
+    initial_tree_names: Vec<IVec>,
     /// New trees that have been opened, but didn't exist in `db` before.
     new_tree_names: Vec<IVec>,
     /// Pointers to sled trees that we have opened.
@@ -38,8 +40,9 @@ pub struct SledDbOverlayState {
 
 impl SledDbOverlayState {
     /// Instantiate a new [`SledDbOverlayState`].
-    pub fn new() -> Self {
+    pub fn new(initial_tree_names: Vec<IVec>) -> Self {
         Self {
+            initial_tree_names,
             new_tree_names: vec![],
             trees: BTreeMap::new(),
             caches: BTreeMap::new(),
@@ -50,7 +53,7 @@ impl SledDbOverlayState {
 
 impl Default for SledDbOverlayState {
     fn default() -> Self {
-        Self::new()
+        Self::new(vec![])
     }
 }
 
@@ -59,8 +62,6 @@ impl Default for SledDbOverlayState {
 pub struct SledDbOverlay {
     /// The [`sled::Db`] that is being overlayed.
     db: sled::Db,
-    /// Existing trees in `db` at the time of instantiation, so we can track newly opened trees.
-    initial_tree_names: Vec<IVec>,
     /// Current overlay cache state
     state: SledDbOverlayState,
     /// Checkpointed cache state to revert to
@@ -70,11 +71,11 @@ pub struct SledDbOverlay {
 impl SledDbOverlay {
     /// Instantiate a new [`SledDbOverlay`] on top of a given [`sled::Db`].
     pub fn new(db: &sled::Db) -> Self {
+        let new_tree_names = db.tree_names();
         Self {
             db: db.clone(),
-            initial_tree_names: db.tree_names(),
-            state: SledDbOverlayState::new(),
-            checkpoint: SledDbOverlayState::new(),
+            state: SledDbOverlayState::new(new_tree_names.clone()),
+            checkpoint: SledDbOverlayState::new(new_tree_names.clone()),
         }
     }
 
@@ -100,7 +101,7 @@ impl SledDbOverlay {
         let tree = self.db.open_tree(&tree_key)?;
         let cache = SledTreeOverlay::new(&tree);
 
-        if !self.initial_tree_names.contains(&tree_key) {
+        if !self.state.initial_tree_names.contains(&tree_key) {
             self.state.new_tree_names.push(tree_key.clone());
         }
 
@@ -129,7 +130,7 @@ impl SledDbOverlay {
         }
 
         // Check if tree existed in the database
-        if !self.initial_tree_names.contains(&tree_key) {
+        if !self.state.initial_tree_names.contains(&tree_key) {
             return Err(sled::Error::CollectionNotFound(tree_key));
         }
 
