@@ -55,9 +55,20 @@ fn sled_tree_overlay_state() -> Result<(), sled::Error> {
     sequence.push(overlay.diff(&sequence));
 
     // Verify overlay has the correct state
-    assert_eq!(overlay.get(b"key_a")?, Some(b"val_a".into()));
-    assert_eq!(overlay.get(b"key_b")?, None);
-    assert_eq!(overlay.get(b"key_c")?, Some(b"val_c".into()));
+    assert_eq!(overlay.state.cache.len(), 2);
+    assert_eq!(
+        overlay.state.cache.get::<sled::IVec>(&b"key_a".into()),
+        Some(&b"val_a".into())
+    );
+    assert_eq!(
+        overlay.state.cache.get::<sled::IVec>(&b"key_c".into()),
+        Some(&b"val_c".into())
+    );
+    assert_eq!(overlay.state.removed.len(), 1);
+    assert_eq!(
+        overlay.state.removed.get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"key_b".into())
+    );
 
     // Verify diffs sequence is correct
     assert_eq!(sequence.len(), 3);
@@ -116,8 +127,7 @@ fn sled_tree_overlay_state() -> Result<(), sled::Error> {
     // Since we removed the diffs, current overlay diff must be
     // the same as the last diff in the sequence
     let diff = overlay.diff(&[]);
-    assert_eq!(diff.cache, sequence[2].cache);
-    assert_eq!(diff.removed, sequence[2].removed);
+    assert_eq!(diff, sequence[2]);
     // Therefore we can safely use its batch
     let batch = overlay.aggregate().unwrap();
     tree.apply_batch(batch)?;

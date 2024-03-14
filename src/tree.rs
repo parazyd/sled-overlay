@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use sled::IVec;
 
 /// Struct representing [`SledTreeOverlay`] cache state
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SledTreeOverlayState {
     /// The cache is the actual overlayed data represented as a [`BTreeMap`].
     pub cache: BTreeMap<IVec, IVec>,
@@ -61,35 +61,6 @@ impl SledTreeOverlayState {
         Some(batch)
     }
 
-    /// Calculate differences from provided tree overlay state.
-    /// This can be used when we want to keep track of consecutive
-    /// individual changes performed over the current tree overlay
-    /// state. If an entry is in the provided cache but not in our
-    /// own cache, we consider it as removed.
-    pub fn diff(&self, other: &Self) -> Self {
-        let mut diff = self.clone();
-        for (k, v) in other.cache.iter() {
-            // Consider as removed if its not in cache
-            let Some(value) = diff.cache.get(k) else {
-                diff.removed.insert(k.clone());
-                continue;
-            };
-
-            // Check if its value has been modified again
-            if v != value {
-                continue;
-            }
-
-            diff.cache.remove(k);
-        }
-
-        for k in other.removed.iter() {
-            diff.removed.remove(k);
-        }
-
-        diff
-    }
-
     /// Remove provided tree overlay state changes from our own.
     pub fn remove_diff(&mut self, other: &Self) {
         for (k, v) in other.cache.iter() {
@@ -119,12 +90,12 @@ impl Default for SledTreeOverlayState {
 }
 
 /// An overlay on top of a single [`sled::Tree`] instance
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SledTreeOverlay {
     /// The [`sled::Tree`] that is being overlayed.
     tree: sled::Tree,
     /// Current overlay cache state
-    state: SledTreeOverlayState,
+    pub state: SledTreeOverlayState,
     /// Checkpointed cache state to revert to
     checkpoint: SledTreeOverlayState,
 }
