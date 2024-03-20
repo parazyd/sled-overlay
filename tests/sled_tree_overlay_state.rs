@@ -146,3 +146,83 @@ fn sled_tree_overlay_state() -> Result<(), sled::Error> {
 
     Ok(())
 }
+
+#[test]
+fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
+    // Initialize database
+    let config = Config::new().temporary(true);
+    let db = config.open()?;
+
+    // Initialize tree with some values and its overlay
+    let tree = db.open_tree(TREE)?;
+    tree.insert(b"key_a", b"val_a")?;
+    let mut overlay = SledTreeOverlay::new(&tree);
+    assert!(!overlay.is_empty());
+
+    // Make two vectors to keep track of changes
+    let mut sequence = vec![];
+    let mut state_sequence = vec![];
+
+    // Perform some changes and grab their differences
+    overlay.insert(b"key_b", b"val_b")?;
+    sequence.push(overlay.diff(&sequence));
+    state_sequence.push(overlay.clone());
+
+    overlay.insert(b"key_b", b"val_bb")?;
+    overlay.remove(b"key_a")?;
+    sequence.push(overlay.diff(&sequence));
+    state_sequence.push(overlay.clone());
+
+    overlay.insert(b"key_a", b"val_a")?;
+    overlay.remove(b"key_b")?;
+    overlay.insert(b"key_c", b"val_c")?;
+    sequence.push(overlay.diff(&sequence));
+
+    // Create a different overlay to rebuild
+    // the previous one using the changes sequence
+    let mut overlay2 = SledTreeOverlay::new(&tree);
+    assert!(!overlay2.is_empty());
+
+    // Add each diff from the sequence and verify
+    // overlay has been mutated accordingly
+    overlay2.add_diff(&sequence[0]);
+    assert_eq!(overlay2.state.cache.len(), 1);
+    assert_eq!(
+        overlay2.state.cache.get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"val_b".into())
+    );
+    assert!(overlay2.state.removed.is_empty());
+    assert_eq!(state_sequence[0].state, overlay2.state);
+
+    overlay2.add_diff(&sequence[1]);
+    assert_eq!(overlay2.state.cache.len(), 1);
+    assert_eq!(
+        overlay2.state.cache.get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"val_bb".into())
+    );
+    assert_eq!(overlay2.state.removed.len(), 1);
+    assert_eq!(
+        overlay2.state.removed.get::<sled::IVec>(&b"key_a".into()),
+        Some(&b"key_a".into())
+    );
+    assert_eq!(state_sequence[1].state, overlay2.state);
+
+    overlay2.add_diff(&sequence[2]);
+    assert_eq!(overlay2.state.cache.len(), 2);
+    assert_eq!(
+        overlay2.state.cache.get::<sled::IVec>(&b"key_a".into()),
+        Some(&b"val_a".into())
+    );
+    assert_eq!(
+        overlay2.state.cache.get::<sled::IVec>(&b"key_c".into()),
+        Some(&b"val_c".into())
+    );
+    assert_eq!(overlay2.state.removed.len(), 1);
+    assert_eq!(
+        overlay2.state.removed.get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"key_b".into())
+    );
+    assert_eq!(overlay.state, overlay2.state);
+
+    Ok(())
+}

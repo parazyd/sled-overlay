@@ -75,6 +75,51 @@ impl SledDbOverlayState {
         Ok((trees, batches))
     }
 
+    /// Add provided `db` overlay state changes from our own.
+    pub fn add_diff(&mut self, other: &Self) {
+        self.initial_tree_names
+            .retain(|x| other.initial_tree_names.contains(x));
+
+        for new_tree_name in &other.new_tree_names {
+            if self.new_tree_names.contains(new_tree_name) {
+                continue;
+            }
+            self.new_tree_names.push(new_tree_name.clone());
+        }
+
+        for (k, v) in other.trees.iter() {
+            if self.trees.contains_key(k) {
+                continue;
+            };
+            self.trees.insert(k.clone(), v.clone());
+        }
+
+        for (k, v) in other.caches.iter() {
+            let Some(tree_overlay) = self.caches.get_mut(k) else {
+                self.caches.insert(k.clone(), v.clone());
+                continue;
+            };
+
+            // If the state is unchanged, we skip it
+            if tree_overlay.state == v.state {
+                continue;
+            }
+
+            // Add the diff from our tree overlay state
+            tree_overlay.add_diff(&v.state);
+        }
+
+        for dropped_tree_name in &other.dropped_tree_names {
+            if self.dropped_tree_names.contains(dropped_tree_name) {
+                continue;
+            }
+            self.new_tree_names.retain(|x| x != dropped_tree_name);
+            self.trees.remove(dropped_tree_name);
+            self.caches.remove(dropped_tree_name);
+            self.dropped_tree_names.push(dropped_tree_name.clone());
+        }
+    }
+
     /// Remove provided `db` overlay state changes from our own.
     pub fn remove_diff(&mut self, other: &Self) {
         // We have some assertions here to catch catastrophic
@@ -386,6 +431,11 @@ impl SledDbOverlay {
         }
 
         current
+    }
+
+    /// Add provided `db` overlay state changes from our own.
+    pub fn add_diff(&mut self, other: &SledDbOverlayState) {
+        self.state.add_diff(other)
     }
 
     /// Remove provided `db` overlay state changes from our own.

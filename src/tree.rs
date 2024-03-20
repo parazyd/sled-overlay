@@ -61,6 +61,21 @@ impl SledTreeOverlayState {
         Some(batch)
     }
 
+    /// Add provided tree overlay state changes to our own.
+    pub fn add_diff(&mut self, other: &Self) {
+        // Add all new keys into cache
+        for (k, v) in other.cache.iter() {
+            self.removed.remove(k);
+            self.cache.insert(k.clone(), v.clone());
+        }
+
+        // Remove dropped keys
+        for k in other.removed.iter() {
+            self.cache.remove(k);
+            self.removed.insert(k.clone());
+        }
+    }
+
     /// Remove provided tree overlay state changes from our own.
     pub fn remove_diff(&mut self, other: &Self) {
         for (k, v) in other.cache.iter() {
@@ -281,6 +296,11 @@ impl SledTreeOverlay {
         }
 
         current
+    }
+
+    /// Add provided tree overlay state changes from our own.
+    pub fn add_diff(&mut self, other: &SledTreeOverlayState) {
+        self.state.add_diff(other)
     }
 
     /// Remove provided tree overlay state changes from our own.

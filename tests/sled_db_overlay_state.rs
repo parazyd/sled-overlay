@@ -443,3 +443,496 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
 
     Ok(())
 }
+
+#[test]
+fn sled_db_overlay_rebuild_state() -> Result<(), sled::Error> {
+    // Initialize database
+    let config = Config::new().temporary(true);
+    let db = config.open()?;
+
+    // Initialize trees with some values
+    let tree_1 = db.open_tree(TREE_1)?;
+    tree_1.insert(b"key_a", b"val_a")?;
+    let tree_4 = db.open_tree(TREE_4)?;
+    tree_4.insert(b"key_g", b"val_g")?;
+
+    // Initialize overlay
+    let mut overlay = SledDbOverlay::new(&db);
+
+    // Open trees in the overlay
+    overlay.open_tree(TREE_1)?;
+    overlay.open_tree(TREE_3)?;
+
+    // Make a vector to keep track of changes
+    let mut sequence = vec![];
+
+    // Perform some changes and grab their differences
+    overlay.insert(TREE_1, b"key_b", b"val_b")?;
+    overlay.insert(TREE_3, b"key_i", b"val_i")?;
+    sequence.push(overlay.diff(&sequence));
+
+    overlay.insert(TREE_1, b"key_b", b"val_bb")?;
+    overlay.remove(TREE_1, b"key_a")?;
+    overlay.open_tree(TREE_2)?;
+    overlay.insert(TREE_2, b"key_d", b"val_d")?;
+    overlay.insert(TREE_2, b"key_e", b"val_e")?;
+    overlay.drop_tree(TREE_3)?;
+    sequence.push(overlay.diff(&sequence));
+
+    overlay.insert(TREE_1, b"key_a", b"val_a")?;
+    overlay.remove(TREE_1, b"key_b")?;
+    overlay.insert(TREE_1, b"key_c", b"val_c")?;
+    overlay.remove(TREE_2, b"key_e")?;
+    overlay.insert(TREE_2, b"key_f", b"val_f")?;
+    overlay.drop_tree(TREE_4)?;
+    overlay.open_tree(TREE_5)?;
+    overlay.insert(TREE_5, b"key_h", b"val_h")?;
+    sequence.push(overlay.diff(&sequence));
+
+    // Create a different overlay to rebuild
+    // the previous one using the changes sequence
+    let mut overlay2 = SledDbOverlay::new(&db);
+    // All trees should be present in sled
+    assert_eq!(overlay2.state.initial_tree_names.len(), 6);
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_1.into()));
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_2.into()));
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_3.into()));
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_4.into()));
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_5.into()));
+    assert!(overlay2.state.new_tree_names.is_empty());
+    assert!(overlay2.state.trees.is_empty());
+    assert!(overlay2.state.caches.is_empty());
+    assert!(overlay2.state.dropped_tree_names.is_empty());
+
+    // Add each diff from the sequence and verify
+    // overlay has been mutated accordingly
+    overlay2.add_diff(&sequence[0]);
+    assert_eq!(overlay2.state.initial_tree_names.len(), 3);
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_1.into()));
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_4.into()));
+    assert_eq!(overlay2.state.new_tree_names, [TREE_3]);
+    assert_eq!(overlay2.state.trees.len(), 2);
+    assert!(overlay2.state.trees.contains_key(TREE_1));
+    assert!(overlay2.state.trees.contains_key(TREE_3));
+    assert_eq!(overlay2.state.caches.len(), 2);
+    assert!(overlay2.state.caches.contains_key(TREE_1));
+    assert!(overlay2.state.caches.contains_key(TREE_3));
+    let tree_1_cache = overlay2.state.caches.get(TREE_1).unwrap();
+    assert_eq!(tree_1_cache.state.cache.len(), 1);
+    assert_eq!(
+        tree_1_cache.state.cache.get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"val_b".into())
+    );
+    assert!(tree_1_cache.state.removed.is_empty());
+    let tree_3_cache = overlay2.state.caches.get(TREE_3).unwrap();
+    assert_eq!(tree_3_cache.state.cache.len(), 1);
+    assert_eq!(
+        tree_3_cache.state.cache.get::<sled::IVec>(&b"key_i".into()),
+        Some(&b"val_i".into())
+    );
+    assert!(tree_3_cache.state.removed.is_empty());
+    assert!(overlay2.state.dropped_tree_names.is_empty());
+
+    overlay2.add_diff(&sequence[1]);
+    assert_eq!(overlay2.state.initial_tree_names.len(), 3);
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_1.into()));
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_4.into()));
+    assert_eq!(overlay2.state.new_tree_names, [TREE_2]);
+    assert_eq!(overlay2.state.trees.len(), 2);
+    assert!(overlay2.state.trees.contains_key(TREE_1));
+    assert!(overlay2.state.trees.contains_key(TREE_2));
+    assert_eq!(overlay2.state.caches.len(), 2);
+    assert!(overlay2.state.caches.contains_key(TREE_1));
+    assert!(overlay2.state.caches.contains_key(TREE_2));
+    let tree_1_cache = overlay2.state.caches.get(TREE_1).unwrap();
+    assert_eq!(tree_1_cache.state.cache.len(), 1);
+    assert_eq!(
+        tree_1_cache.state.cache.get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"val_bb".into())
+    );
+    assert_eq!(tree_1_cache.state.removed.len(), 1);
+    assert_eq!(
+        tree_1_cache
+            .state
+            .removed
+            .get::<sled::IVec>(&b"key_a".into()),
+        Some(&b"key_a".into())
+    );
+    let tree_2_cache = overlay2.state.caches.get(TREE_2).unwrap();
+    assert_eq!(tree_2_cache.state.cache.len(), 2);
+    assert_eq!(
+        tree_2_cache.state.cache.get::<sled::IVec>(&b"key_d".into()),
+        Some(&b"val_d".into())
+    );
+    assert_eq!(
+        tree_2_cache.state.cache.get::<sled::IVec>(&b"key_e".into()),
+        Some(&b"val_e".into())
+    );
+    assert!(tree_2_cache.state.removed.is_empty());
+    assert_eq!(overlay2.state.dropped_tree_names, [TREE_3]);
+
+    // Deviate and create some new records in the overlay
+    overlay2.insert(TREE_1, b"key_c", b"val_cc")?;
+    overlay2.remove(TREE_2, b"key_e")?;
+    overlay2.open_tree(TREE_4)?;
+    overlay2.insert(TREE_4, b"key_f", b"val_f")?;
+
+    // Verify overlay2 has the correct state
+    assert_eq!(overlay2.state.initial_tree_names.len(), 3);
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_1.into()));
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_4.into()));
+    assert_eq!(overlay2.state.new_tree_names, [TREE_2]);
+    assert_eq!(overlay2.state.trees.len(), 3);
+    assert!(overlay2.state.trees.contains_key(TREE_1));
+    assert!(overlay2.state.trees.contains_key(TREE_2));
+    assert!(overlay2.state.trees.contains_key(TREE_4));
+    assert_eq!(overlay2.state.caches.len(), 3);
+    assert!(overlay2.state.caches.contains_key(TREE_1));
+    assert!(overlay2.state.caches.contains_key(TREE_2));
+    assert!(overlay2.state.caches.contains_key(TREE_4));
+    let tree_1_cache = overlay2.state.caches.get(TREE_1).unwrap();
+    assert_eq!(tree_1_cache.state.cache.len(), 2);
+    assert_eq!(
+        tree_1_cache.state.cache.get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"val_bb".into())
+    );
+    assert_eq!(
+        tree_1_cache.state.cache.get::<sled::IVec>(&b"key_c".into()),
+        Some(&b"val_cc".into())
+    );
+    assert_eq!(tree_1_cache.state.removed.len(), 1);
+    assert_eq!(
+        tree_1_cache
+            .state
+            .removed
+            .get::<sled::IVec>(&b"key_a".into()),
+        Some(&b"key_a".into())
+    );
+    let tree_2_cache = overlay2.state.caches.get(TREE_2).unwrap();
+    assert_eq!(tree_2_cache.state.cache.len(), 1);
+    assert_eq!(
+        tree_2_cache.state.cache.get::<sled::IVec>(&b"key_d".into()),
+        Some(&b"val_d".into())
+    );
+    assert_eq!(tree_2_cache.state.removed.len(), 1);
+    assert_eq!(
+        tree_2_cache
+            .state
+            .removed
+            .get::<sled::IVec>(&b"key_e".into()),
+        Some(&b"key_e".into())
+    );
+    let tree_4_cache = overlay2.state.caches.get(TREE_4).unwrap();
+    assert_eq!(tree_4_cache.state.cache.len(), 1);
+    assert_eq!(
+        tree_4_cache.state.cache.get::<sled::IVec>(&b"key_f".into()),
+        Some(&b"val_f".into())
+    );
+    assert!(tree_4_cache.state.removed.is_empty());
+    assert_eq!(overlay2.state.dropped_tree_names, [TREE_3]);
+
+    // Now we are going to apply each diff and check that sled
+    // and the overlays have been mutated accordingly.
+    // Don't forget to flush.
+    assert_eq!(overlay.apply_diff(&mut sequence[0]), Ok(()));
+    overlay2.remove_diff(&mut sequence[0]);
+    db.flush()?;
+
+    // All trees should be present in sled
+    let db_tree_names = db.tree_names();
+    assert_eq!(db_tree_names.len(), 6);
+    assert!(db_tree_names.contains(&TREE_1.into()));
+    assert!(db_tree_names.contains(&TREE_2.into()));
+    assert!(db_tree_names.contains(&TREE_3.into()));
+    assert!(db_tree_names.contains(&TREE_4.into()));
+    assert!(db_tree_names.contains(&TREE_5.into()));
+
+    let tree_1 = db.open_tree(TREE_1)?;
+    assert_eq!(tree_1.len(), 2);
+    assert_eq!(tree_1.get(b"key_a")?, Some(b"val_a".into()));
+    assert_eq!(tree_1.get(b"key_b")?, Some(b"val_b".into()));
+    let tree_2 = db.open_tree(TREE_2)?;
+    assert!(tree_2.is_empty());
+    let tree_3 = db.open_tree(TREE_3)?;
+    assert_eq!(tree_3.len(), 1);
+    assert_eq!(tree_3.get(b"key_i")?, Some(b"val_i".into()));
+    let tree_4 = db.open_tree(TREE_4)?;
+    assert_eq!(tree_4.len(), 1);
+    assert_eq!(tree_4.get(b"key_g")?, Some(b"val_g".into()));
+    let tree_5 = db.open_tree(TREE_5)?;
+    assert!(tree_5.is_empty());
+
+    assert_eq!(overlay.state.initial_tree_names.len(), 4);
+    assert!(overlay.state.initial_tree_names.contains(&TREE_1.into()));
+    assert!(overlay.state.initial_tree_names.contains(&TREE_4.into()));
+    assert!(overlay.state.initial_tree_names.contains(&TREE_3.into()));
+    assert_eq!(overlay.state.new_tree_names, [TREE_2, TREE_5]);
+    assert_eq!(overlay.state.trees.len(), 3);
+    assert!(overlay.state.trees.contains_key(TREE_1));
+    assert!(overlay.state.trees.contains_key(TREE_2));
+    assert!(overlay.state.trees.contains_key(TREE_5));
+    assert_eq!(overlay.state.caches.len(), 3);
+    assert!(overlay.state.caches.contains_key(TREE_1));
+    assert!(overlay.state.caches.contains_key(TREE_2));
+    assert!(overlay.state.caches.contains_key(TREE_5));
+    let tree_1_cache = overlay.state.caches.get(TREE_1).unwrap();
+    assert_eq!(tree_1_cache.state.cache.len(), 2);
+    assert_eq!(
+        tree_1_cache.state.cache.get::<sled::IVec>(&b"key_a".into()),
+        Some(&b"val_a".into())
+    );
+    assert_eq!(
+        tree_1_cache.state.cache.get::<sled::IVec>(&b"key_c".into()),
+        Some(&b"val_c".into())
+    );
+    assert_eq!(tree_1_cache.state.removed.len(), 1);
+    assert_eq!(
+        tree_1_cache
+            .state
+            .removed
+            .get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"key_b".into())
+    );
+    let tree_2_cache = overlay.state.caches.get(TREE_2).unwrap();
+    assert_eq!(tree_2_cache.state.cache.len(), 2);
+    assert_eq!(
+        tree_2_cache.state.cache.get::<sled::IVec>(&b"key_d".into()),
+        Some(&b"val_d".into())
+    );
+    assert_eq!(
+        tree_2_cache.state.cache.get::<sled::IVec>(&b"key_f".into()),
+        Some(&b"val_f".into())
+    );
+    assert_eq!(tree_2_cache.state.removed.len(), 1);
+    assert_eq!(
+        tree_2_cache
+            .state
+            .removed
+            .get::<sled::IVec>(&b"key_e".into()),
+        Some(&b"key_e".into())
+    );
+    let tree_5_cache = overlay.state.caches.get(TREE_5).unwrap();
+    assert_eq!(tree_5_cache.state.cache.len(), 1);
+    assert_eq!(
+        tree_5_cache.state.cache.get::<sled::IVec>(&b"key_h".into()),
+        Some(&b"val_h".into())
+    );
+    assert!(tree_5_cache.state.removed.is_empty());
+    assert_eq!(overlay.state.dropped_tree_names, [TREE_3, TREE_4]);
+
+    assert_eq!(overlay2.state.initial_tree_names.len(), 4);
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_1.into()));
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_4.into()));
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_3.into()));
+    assert_eq!(overlay2.state.new_tree_names, [TREE_2]);
+    assert_eq!(overlay2.state.trees.len(), 3);
+    assert!(overlay2.state.trees.contains_key(TREE_1));
+    assert!(overlay2.state.trees.contains_key(TREE_2));
+    assert!(overlay2.state.trees.contains_key(TREE_4));
+    assert_eq!(overlay2.state.caches.len(), 3);
+    assert!(overlay2.state.caches.contains_key(TREE_1));
+    assert!(overlay2.state.caches.contains_key(TREE_2));
+    assert!(overlay2.state.caches.contains_key(TREE_4));
+    let tree_1_cache = overlay2.state.caches.get(TREE_1).unwrap();
+    assert_eq!(tree_1_cache.state.cache.len(), 2);
+    assert_eq!(
+        tree_1_cache.state.cache.get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"val_bb".into())
+    );
+    assert_eq!(
+        tree_1_cache.state.cache.get::<sled::IVec>(&b"key_c".into()),
+        Some(&b"val_cc".into())
+    );
+    assert_eq!(tree_1_cache.state.removed.len(), 1);
+    assert_eq!(
+        tree_1_cache
+            .state
+            .removed
+            .get::<sled::IVec>(&b"key_a".into()),
+        Some(&b"key_a".into())
+    );
+    let tree_2_cache = overlay2.state.caches.get(TREE_2).unwrap();
+    assert_eq!(tree_2_cache.state.cache.len(), 1);
+    assert_eq!(
+        tree_2_cache.state.cache.get::<sled::IVec>(&b"key_d".into()),
+        Some(&b"val_d".into())
+    );
+    assert_eq!(tree_2_cache.state.removed.len(), 1);
+    assert_eq!(
+        tree_2_cache
+            .state
+            .removed
+            .get::<sled::IVec>(&b"key_e".into()),
+        Some(&b"key_e".into())
+    );
+    let tree_4_cache = overlay2.state.caches.get(TREE_4).unwrap();
+    assert_eq!(tree_4_cache.state.cache.len(), 1);
+    assert_eq!(
+        tree_4_cache.state.cache.get::<sled::IVec>(&b"key_f".into()),
+        Some(&b"val_f".into())
+    );
+    assert!(tree_4_cache.state.removed.is_empty());
+    assert_eq!(overlay2.state.dropped_tree_names, [TREE_3]);
+
+    assert_eq!(overlay.apply_diff(&mut sequence[1]), Ok(()));
+    overlay2.remove_diff(&mut sequence[1]);
+    db.flush()?;
+
+    // All trees should be present in sled
+    let db_tree_names = db.tree_names();
+    assert_eq!(db_tree_names.len(), 5);
+    assert!(db_tree_names.contains(&TREE_1.into()));
+    assert!(db_tree_names.contains(&TREE_2.into()));
+    assert!(db_tree_names.contains(&TREE_4.into()));
+    assert!(db_tree_names.contains(&TREE_5.into()));
+
+    let tree_1 = db.open_tree(TREE_1)?;
+    assert_eq!(tree_1.len(), 1);
+    assert_eq!(tree_1.get(b"key_b")?, Some(b"val_bb".into()));
+    let tree_2 = db.open_tree(TREE_2)?;
+    assert_eq!(tree_2.len(), 2);
+    assert_eq!(tree_2.get(b"key_d")?, Some(b"val_d".into()));
+    assert_eq!(tree_2.get(b"key_e")?, Some(b"val_e".into()));
+    let tree_4 = db.open_tree(TREE_4)?;
+    assert_eq!(tree_4.len(), 1);
+    assert_eq!(tree_4.get(b"key_g")?, Some(b"val_g".into()));
+
+    assert_eq!(overlay.state.initial_tree_names.len(), 4);
+    assert!(overlay.state.initial_tree_names.contains(&TREE_1.into()));
+    assert!(overlay.state.initial_tree_names.contains(&TREE_2.into()));
+    assert!(overlay.state.initial_tree_names.contains(&TREE_4.into()));
+    assert_eq!(overlay.state.new_tree_names, [TREE_5]);
+    assert_eq!(overlay.state.trees.len(), 3);
+    assert!(overlay.state.trees.contains_key(TREE_1));
+    assert!(overlay.state.trees.contains_key(TREE_2));
+    assert!(overlay.state.trees.contains_key(TREE_5));
+    assert_eq!(overlay.state.caches.len(), 3);
+    assert!(overlay.state.caches.contains_key(TREE_1));
+    assert!(overlay.state.caches.contains_key(TREE_2));
+    assert!(overlay.state.caches.contains_key(TREE_5));
+    let tree_1_cache = overlay.state.caches.get(TREE_1).unwrap();
+    assert_eq!(tree_1_cache.state.cache.len(), 2);
+    assert_eq!(
+        tree_1_cache.state.cache.get::<sled::IVec>(&b"key_a".into()),
+        Some(&b"val_a".into())
+    );
+    assert_eq!(
+        tree_1_cache.state.cache.get::<sled::IVec>(&b"key_c".into()),
+        Some(&b"val_c".into())
+    );
+    assert_eq!(tree_1_cache.state.removed.len(), 1);
+    assert_eq!(
+        tree_1_cache
+            .state
+            .removed
+            .get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"key_b".into())
+    );
+    let tree_2_cache = overlay.state.caches.get(TREE_2).unwrap();
+    assert_eq!(tree_2_cache.state.cache.len(), 1);
+    assert_eq!(
+        tree_2_cache.state.cache.get::<sled::IVec>(&b"key_f".into()),
+        Some(&b"val_f".into())
+    );
+    assert_eq!(tree_2_cache.state.removed.len(), 1);
+    assert_eq!(
+        tree_2_cache
+            .state
+            .removed
+            .get::<sled::IVec>(&b"key_e".into()),
+        Some(&b"key_e".into())
+    );
+    let tree_5_cache = overlay.state.caches.get(TREE_5).unwrap();
+    assert_eq!(tree_5_cache.state.cache.len(), 1);
+    assert_eq!(
+        tree_5_cache.state.cache.get::<sled::IVec>(&b"key_h".into()),
+        Some(&b"val_h".into())
+    );
+    assert!(tree_5_cache.state.removed.is_empty());
+    assert_eq!(overlay.state.dropped_tree_names, [TREE_4]);
+
+    assert_eq!(overlay2.state.initial_tree_names.len(), 4);
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_1.into()));
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_4.into()));
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_2.into()));
+    assert!(overlay2.state.new_tree_names.is_empty());
+    assert_eq!(overlay2.state.trees.len(), 3);
+    assert!(overlay2.state.trees.contains_key(TREE_1));
+    assert!(overlay2.state.trees.contains_key(TREE_2));
+    assert!(overlay2.state.trees.contains_key(TREE_4));
+    assert_eq!(overlay2.state.caches.len(), 3);
+    assert!(overlay2.state.caches.contains_key(TREE_1));
+    assert!(overlay2.state.caches.contains_key(TREE_2));
+    assert!(overlay2.state.caches.contains_key(TREE_4));
+    let tree_1_cache = overlay2.state.caches.get(TREE_1).unwrap();
+    assert_eq!(tree_1_cache.state.cache.len(), 1);
+    assert_eq!(
+        tree_1_cache.state.cache.get::<sled::IVec>(&b"key_c".into()),
+        Some(&b"val_cc".into())
+    );
+    assert!(tree_1_cache.state.removed.is_empty());
+    let tree_2_cache = overlay2.state.caches.get(TREE_2).unwrap();
+    assert!(tree_2_cache.state.cache.is_empty());
+    assert_eq!(tree_2_cache.state.removed.len(), 1);
+    assert_eq!(
+        tree_2_cache
+            .state
+            .removed
+            .get::<sled::IVec>(&b"key_e".into()),
+        Some(&b"key_e".into())
+    );
+    let tree_4_cache = overlay2.state.caches.get(TREE_4).unwrap();
+    assert_eq!(tree_4_cache.state.cache.len(), 1);
+    assert_eq!(
+        tree_4_cache.state.cache.get::<sled::IVec>(&b"key_f".into()),
+        Some(&b"val_f".into())
+    );
+    assert!(tree_4_cache.state.removed.is_empty());
+    assert!(overlay2.state.dropped_tree_names.is_empty());
+
+    // We chose to follow the second overlay, so we apply its diff
+    assert_eq!(overlay2.apply_diff(&mut overlay2.diff(&[])), Ok(()));
+    db.flush()?;
+
+    // All trees should be present in sled
+    let db_tree_names = db.tree_names();
+    assert_eq!(db_tree_names.len(), 5);
+    assert!(db_tree_names.contains(&TREE_1.into()));
+    assert!(db_tree_names.contains(&TREE_2.into()));
+    assert!(db_tree_names.contains(&TREE_4.into()));
+    assert!(db_tree_names.contains(&TREE_5.into()));
+
+    let tree_1 = db.open_tree(TREE_1)?;
+    assert_eq!(tree_1.len(), 2);
+    assert_eq!(tree_1.get(b"key_b")?, Some(b"val_bb".into()));
+    assert_eq!(tree_1.get(b"key_c")?, Some(b"val_cc".into()));
+    let tree_2 = db.open_tree(TREE_2)?;
+    assert_eq!(tree_2.len(), 1);
+    assert_eq!(tree_2.get(b"key_d")?, Some(b"val_d".into()));
+    let tree_4 = db.open_tree(TREE_4)?;
+    assert_eq!(tree_4.len(), 2);
+    assert_eq!(tree_4.get(b"key_g")?, Some(b"val_g".into()));
+    assert_eq!(tree_4.get(b"key_f")?, Some(b"val_f".into()));
+
+    // Since we removed everything, current overlay must not have
+    // diffs over the tree, therefore its safe to keep using it
+    assert_eq!(overlay2.state.initial_tree_names.len(), 4);
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_1.into()));
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_2.into()));
+    assert!(overlay2.state.initial_tree_names.contains(&TREE_4.into()));
+    assert!(overlay2.state.new_tree_names.is_empty());
+    assert!(overlay2.state.trees.is_empty());
+    assert!(overlay2.state.caches.is_empty());
+    assert!(overlay2.state.dropped_tree_names.is_empty());
+
+    // Since we used overlay2, we must drop the new trees from original
+    // overlay that are not present now, and stop using it.
+    db.drop_tree(&TREE_5)?;
+    let db_tree_names = db.tree_names();
+    assert_eq!(db_tree_names.len(), 4);
+    assert!(db_tree_names.contains(&TREE_1.into()));
+    assert!(db_tree_names.contains(&TREE_2.into()));
+    assert!(db_tree_names.contains(&TREE_4.into()));
+
+    Ok(())
+}
