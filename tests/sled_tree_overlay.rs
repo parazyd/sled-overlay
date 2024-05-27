@@ -83,12 +83,10 @@ fn sled_tree_overlay() -> Result<(), sled::Error> {
     assert_eq!(tree_2.get(b"key_f")?, None);
 
     // Aggregate all the batches for writing
-    let mut batches = vec![];
-    batches.push(overlay_1.aggregate());
-    batches.push(overlay_2.aggregate());
+    let batches = [overlay_1.aggregate(), overlay_2.aggregate()];
 
     // Now we write them to sled
-    vec![&tree_1, &tree_2]
+    [&tree_1, &tree_2]
         .transaction(|trees| {
             for (i, tree) in trees.iter().enumerate() {
                 if let Some(batch) = &batches[i] {

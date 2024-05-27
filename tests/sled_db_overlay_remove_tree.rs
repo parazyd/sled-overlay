@@ -43,10 +43,10 @@ fn sled_db_overlay_remove_tree() -> Result<(), sled::Error> {
     db.flush()?;
 
     // Initialize overlay
-    let mut overlay = SledDbOverlay::new(&db);
+    let mut overlay = SledDbOverlay::new(&db, vec![]);
 
     // Open tree in the overlay
-    overlay.open_tree(TREE_1)?;
+    overlay.open_tree(TREE_1, false)?;
 
     // Verify values are in the overlay
     assert_eq!(overlay.get(TREE_1, b"key_a")?, Some(b"val_a".into()));
@@ -63,7 +63,7 @@ fn sled_db_overlay_remove_tree() -> Result<(), sled::Error> {
     assert!(overlay.drop_tree(TREE_2).is_err());
 
     // Open the new tree
-    overlay.open_tree(TREE_2)?;
+    overlay.open_tree(TREE_2, false)?;
 
     // Drop the new tree
     overlay.drop_tree(TREE_2)?;

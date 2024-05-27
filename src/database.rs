@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use sled::transaction::{ConflictableTransactionError, TransactionError};
 use sled::{IVec, Transactional};
@@ -36,17 +36,21 @@ pub struct SledDbOverlayState {
     pub caches: BTreeMap<IVec, SledTreeOverlay>,
     /// Trees that were dropped.
     pub dropped_tree_names: Vec<IVec>,
+    /// Protected trees, that we don't allow their removal,
+    /// and don't drop their references if they become stale.
+    pub protected_tree_names: Vec<IVec>,
 }
 
 impl SledDbOverlayState {
     /// Instantiate a new [`SledDbOverlayState`].
-    pub fn new(initial_tree_names: Vec<IVec>) -> Self {
+    pub fn new(initial_tree_names: Vec<IVec>, protected_tree_names: Vec<IVec>) -> Self {
         Self {
             initial_tree_names,
             new_tree_names: vec![],
             trees: BTreeMap::new(),
             caches: BTreeMap::new(),
             dropped_tree_names: vec![],
+            protected_tree_names,
         }
     }
 
@@ -150,8 +154,17 @@ impl SledDbOverlayState {
                 continue;
             };
 
-            // If the state is unchanged, we drop the stale reference
+            // If the state is unchanged, handle the stale tree
             if tree_overlay.state == v.state {
+                // If tree is protected, we simply reset its cache
+                if self.protected_tree_names.contains(k) {
+                    tree_overlay.state.cache = BTreeMap::new();
+                    tree_overlay.state.removed = BTreeSet::new();
+                    tree_overlay.checkpoint();
+                    continue;
+                }
+
+                // Drop the stale reference
                 self.trees.remove(k);
                 self.caches.remove(k);
                 continue;
@@ -181,7 +194,7 @@ impl SledDbOverlayState {
 
 impl Default for SledDbOverlayState {
     fn default() -> Self {
-        Self::new(vec![])
+        Self::new(vec![], vec![])
     }
 }
 
@@ -198,12 +211,21 @@ pub struct SledDbOverlay {
 
 impl SledDbOverlay {
     /// Instantiate a new [`SledDbOverlay`] on top of a given [`sled::Db`].
-    pub fn new(db: &sled::Db) -> Self {
-        let new_tree_names = db.tree_names();
+    /// Note: Provided protected trees don't have to be opened as protected,
+    /// as they are setup as protected here.
+    pub fn new(db: &sled::Db, protected_tree_names: Vec<&[u8]>) -> Self {
+        let initial_tree_names = db.tree_names();
+        let protected_tree_names: Vec<IVec> = protected_tree_names
+            .into_iter()
+            .map(|tree_name| tree_name.into())
+            .collect();
         Self {
             db: db.clone(),
-            state: SledDbOverlayState::new(new_tree_names.clone()),
-            checkpoint: SledDbOverlayState::new(new_tree_names.clone()),
+            state: SledDbOverlayState::new(
+                initial_tree_names.clone(),
+                protected_tree_names.clone(),
+            ),
+            checkpoint: SledDbOverlayState::new(initial_tree_names, protected_tree_names),
         }
     }
 
@@ -211,7 +233,9 @@ impl SledDbOverlay {
     /// This function will also open a new tree inside `db` regardless of if it has
     /// existed before, so for convenience, we also provide [`SledDbOverlay::purge_new_trees`]
     /// in case we decide we don't want to write the batches, and drop the new trees.
-    pub fn open_tree(&mut self, tree_name: &[u8]) -> Result<(), sled::Error> {
+    /// Additionally, a boolean flag is passed to mark the oppened tree as protected,
+    /// meanning that it can't be removed and its references will never be dropped.
+    pub fn open_tree(&mut self, tree_name: &[u8], protected: bool) -> Result<(), sled::Error> {
         let tree_key: IVec = tree_name.into();
 
         // We don't allow reopening a dropped tree.
@@ -234,7 +258,12 @@ impl SledDbOverlay {
         }
 
         self.state.trees.insert(tree_key.clone(), tree);
-        self.state.caches.insert(tree_key, cache);
+        self.state.caches.insert(tree_key.clone(), cache);
+
+        // Mark tree as protected if requested
+        if protected && !self.state.protected_tree_names.contains(&tree_key) {
+            self.state.protected_tree_names.push(tree_key);
+        }
 
         Ok(())
     }
@@ -242,6 +271,13 @@ impl SledDbOverlay {
     /// Drop a sled tree from the overlay.
     pub fn drop_tree(&mut self, tree_name: &[u8]) -> Result<(), sled::Error> {
         let tree_key: IVec = tree_name.into();
+
+        // Check if tree is protected
+        if self.state.protected_tree_names.contains(&tree_key) {
+            return Err(sled::Error::Unsupported(
+                "Protected tree can't be dropped".to_string(),
+            ));
+        }
 
         // Check if already removed
         if self.state.dropped_tree_names.contains(&tree_key) {

@@ -34,10 +34,10 @@ fn sled_db_overlay_checkpoint() -> Result<(), sled::Error> {
     let db = config.open()?;
 
     // Initialize overlay
-    let mut overlay = SledDbOverlay::new(&db);
+    let mut overlay = SledDbOverlay::new(&db, vec![]);
 
     // Open tree in the overlay
-    overlay.open_tree(TREE)?;
+    overlay.open_tree(TREE, false)?;
 
     // We keep seperate trees for validation
     let tree = db.open_tree(TREE)?;
@@ -76,7 +76,7 @@ fn sled_db_overlay_checkpoint() -> Result<(), sled::Error> {
     assert_eq!(tree.get(b"key_f")?, None);
 
     // We also create a new tree
-    overlay.open_tree(NEW_TREE)?;
+    overlay.open_tree(NEW_TREE, false)?;
 
     // We assume something went wrong, so we revert to last checkpoint
     overlay.revert_to_checkpoint()?;

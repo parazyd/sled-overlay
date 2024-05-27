@@ -34,10 +34,10 @@ fn new_tree_remove() -> Result<(), sled::Error> {
     let db = config.open()?;
 
     // Initialize overlay
-    let mut overlay = SledDbOverlay::new(&db);
+    let mut overlay = SledDbOverlay::new(&db, vec![]);
 
     // Open tree in the overlay
-    overlay.open_tree(TREE)?;
+    overlay.open_tree(TREE, false)?;
 
     // We keep seperate tree for validation
     let tree = db.open_tree(TREE)?;
@@ -76,12 +76,12 @@ fn new_tree_remove_multiple_overlays() -> Result<(), sled::Error> {
     let db = config.open()?;
 
     // Initialize overlays
-    let mut overlay0 = SledDbOverlay::new(&db);
-    let mut overlay1 = SledDbOverlay::new(&db);
+    let mut overlay0 = SledDbOverlay::new(&db, vec![]);
+    let mut overlay1 = SledDbOverlay::new(&db, vec![]);
 
     // Open tree in the overlays
-    overlay0.open_tree(TREE)?;
-    overlay1.open_tree(TREE)?;
+    overlay0.open_tree(TREE, false)?;
+    overlay1.open_tree(TREE, false)?;
 
     // We keep seperate tree for validation
     let tree = db.open_tree(TREE)?;

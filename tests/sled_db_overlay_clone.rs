@@ -33,10 +33,10 @@ fn sled_db_overlay_clone() -> Result<(), sled::Error> {
     let db = config.open()?;
 
     // Initialize overlay
-    let mut overlay = SledDbOverlay::new(&db);
+    let mut overlay = SledDbOverlay::new(&db, vec![]);
 
     // Open tree in the overlay
-    overlay.open_tree(TREE)?;
+    overlay.open_tree(TREE, false)?;
 
     // Check overlay tree is empty
     assert!(overlay.is_empty(TREE)?);
