@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use sled::IVec;
 
-/// Struct representing [`SledTreeOverlay`] cache state
+/// Struct representing [`SledTreeOverlay`] cache state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SledTreeOverlayState {
     /// The cache is the actual overlayed data represented as a [`BTreeMap`].
@@ -62,6 +62,21 @@ impl SledTreeOverlayState {
     }
 
     /// Add provided tree overlay state changes to our own.
+    pub fn add_diff2(&mut self, diff: &SledTreeOverlayStateDiff) {
+        // Add all new keys into cache
+        for (k, v) in diff.cache.iter() {
+            self.removed.remove(k);
+            self.cache.insert(k.clone(), v.1.clone());
+        }
+
+        // Remove dropped keys
+        for k in diff.removed.keys() {
+            self.cache.remove(k);
+            self.removed.insert(k.clone());
+        }
+    }
+
+    /// Add provided tree overlay state changes to our own.
     pub fn add_diff(&mut self, other: &Self) {
         // Add all new keys into cache
         for (k, v) in other.cache.iter() {
@@ -73,6 +88,27 @@ impl SledTreeOverlayState {
         for k in other.removed.iter() {
             self.cache.remove(k);
             self.removed.insert(k.clone());
+        }
+    }
+
+    /// Remove provided tree overlay state changes from our own.
+    pub fn remove_diff2(&mut self, diff: &SledTreeOverlayStateDiff) {
+        for (k, v) in diff.cache.iter() {
+            // Skip if its not in cache
+            let Some(value) = self.cache.get(k) else {
+                continue;
+            };
+
+            // Check if its value has been modified again
+            if v.1 != value {
+                continue;
+            }
+
+            self.cache.remove(k);
+        }
+
+        for k in diff.removed.keys() {
+            self.removed.remove(k);
         }
     }
 
@@ -104,7 +140,126 @@ impl Default for SledTreeOverlayState {
     }
 }
 
-/// An overlay on top of a single [`sled::Tree`] instance
+/// Auxilliary struct representing a [`SledTreeOverlayState`] diff log.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SledTreeOverlayStateDiff {
+    /// Inserted data represented as a [`BTreeMap`].
+    /// The value contains both the previous key value(if it existed), along
+    /// with the new one.
+    pub cache: BTreeMap<IVec, (Option<IVec>, IVec)>,
+    /// In `removed`, we keep track of keys that were removed in the overlay,
+    /// along with their value.
+    pub removed: BTreeMap<IVec, IVec>,
+}
+
+impl SledTreeOverlayStateDiff {
+    /// Instantiate a new [`SledTreeOverlayStateDiff`], over the provided
+    /// [`sled::Tree`] that is being overlayed.
+    pub fn new(tree: &sled::Tree, state: &SledTreeOverlayState) -> Result<Self, sled::Error> {
+        let mut cache = BTreeMap::new();
+        let mut removed = BTreeMap::new();
+
+        // Set inserted keys
+        for (key, value) in state.cache.iter() {
+            // Grab each key previous value, if it existed.
+            let previous = tree.get::<IVec>(key.into())?;
+            cache.insert(key.into(), (previous, value.into()));
+        }
+
+        // Set removed keys, if they exist
+        for key in state.removed.iter() {
+            if let Some(previous) = tree.get(key)? {
+                removed.insert(key.into(), previous);
+            };
+        }
+
+        Ok(Self { cache, removed })
+    }
+
+    /// Aggregate all the current tree overlay state changes into
+    /// a [`sled::Batch`] ready for further operation.
+    /// If there are no changes, return `None`.
+    pub fn aggregate(&self) -> Option<sled::Batch> {
+        if self.cache.is_empty() && self.removed.is_empty() {
+            return None;
+        }
+
+        let mut batch = sled::Batch::default();
+
+        // This kind of first-insert-then-remove operation should be fine
+        // provided it's handled correctly in the above functions.
+        for (k, v) in self.cache.iter() {
+            batch.insert(k, v.1.clone());
+        }
+
+        for k in self.removed.keys() {
+            batch.remove(k);
+        }
+
+        Some(batch)
+    }
+
+    /// Aggregate all the current tree overlay state changes inverse
+    /// actions into a [`sled::Batch`] ready for further operation.
+    /// If there are no changes, return `None`.
+    pub fn revert(&self) -> Option<sled::Batch> {
+        if self.cache.is_empty() && self.removed.is_empty() {
+            return None;
+        }
+
+        let mut batch = sled::Batch::default();
+
+        // This kind of first-insert-then-remove operation should be fine
+        // provided it's handled correctly in the above functions.
+        for (k, v) in self.removed.iter() {
+            batch.insert(k, v.clone());
+        }
+
+        for (k, v) in self.cache.iter() {
+            // If key value has been modified, revert to previous one
+            if let Some(value) = &v.0 {
+                batch.insert(k, value.clone());
+                continue;
+            }
+            batch.remove(k);
+        }
+
+        Some(batch)
+    }
+
+    /// Remove provided tree overlay state changes from our own.
+    pub fn remove_diff(&mut self, other: &Self) {
+        for (k, v) in other.cache.iter() {
+            // Set as removed if its not in cache
+            let Some(values) = self.cache.get(k) else {
+                self.removed.insert(k.clone(), v.1.clone());
+                continue;
+            };
+
+            // Check if its value has been modified again
+            if v.1 != values.1 {
+                // Set previous value
+                self.cache
+                    .insert(k.clone(), (Some(v.1.clone()), values.1.clone()));
+                continue;
+            }
+
+            self.cache.remove(k);
+        }
+
+        for k in other.removed.keys() {
+            // Update cache key previous, if it exits
+            if let Some(values) = self.cache.get(k) {
+                self.cache.insert(k.clone(), (None, values.1.clone()));
+                continue;
+            }
+
+            self.removed.remove(k);
+        }
+    }
+}
+
+/// An overlay on top of a single [`sled::Tree`] instance.
 #[derive(Debug, Clone)]
 pub struct SledTreeOverlay {
     /// The [`sled::Tree`] that is being overlayed.
@@ -286,6 +441,26 @@ impl SledTreeOverlay {
     /// consecutive individual changes performed over the current
     /// overlay state. If the sequence is empty, current state
     /// is returned as the diff.
+    pub fn diff2(
+        &self,
+        sequence: &[SledTreeOverlayStateDiff],
+    ) -> Result<SledTreeOverlayStateDiff, sled::Error> {
+        // Grab current state
+        let mut current = SledTreeOverlayStateDiff::new(&self.tree, &self.state)?;
+
+        // Remove provided diffs sequence
+        for diff in sequence {
+            current.remove_diff(diff);
+        }
+
+        Ok(current)
+    }
+
+    /// Calculate differences from provided overlay state changes
+    /// sequence. This can be used when we want to keep track of
+    /// consecutive individual changes performed over the current
+    /// overlay state. If the sequence is empty, current state
+    /// is returned as the diff.
     pub fn diff(&self, sequence: &[SledTreeOverlayState]) -> SledTreeOverlayState {
         // Grab current state
         let mut current = self.state.clone();
@@ -299,8 +474,18 @@ impl SledTreeOverlay {
     }
 
     /// Add provided tree overlay state changes from our own.
+    pub fn add_diff2(&mut self, diff: &SledTreeOverlayStateDiff) {
+        self.state.add_diff2(diff)
+    }
+
+    /// Add provided tree overlay state changes from our own.
     pub fn add_diff(&mut self, other: &SledTreeOverlayState) {
         self.state.add_diff(other)
+    }
+
+    /// Remove provided tree overlay state changes from our own.
+    pub fn remove_diff2(&mut self, diff: &SledTreeOverlayStateDiff) {
+        self.state.remove_diff2(diff)
     }
 
     /// Remove provided tree overlay state changes from our own.
