@@ -24,7 +24,7 @@
 //! rollback-like functionality.
 
 pub mod tree;
-pub use tree::SledTreeOverlay;
+pub use tree::{SledTreeOverlay, SledTreeOverlayStateDiff};
 
 pub mod database;
 pub use database::SledDbOverlay;

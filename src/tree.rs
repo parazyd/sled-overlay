@@ -134,6 +134,23 @@ impl SledTreeOverlayState {
     }
 }
 
+impl From<&SledTreeOverlayStateDiff> for SledTreeOverlayState {
+    fn from(diff: &SledTreeOverlayStateDiff) -> Self {
+        let mut cache = BTreeMap::new();
+        let mut removed = BTreeSet::new();
+
+        for (key, value) in diff.cache.iter() {
+            cache.insert(key.clone(), value.1.clone());
+        }
+
+        for key in diff.removed.keys() {
+            removed.insert(key.clone());
+        }
+
+        Self { cache, removed }
+    }
+}
+
 /// Auxilliary struct representing a [`SledTreeOverlayState`] diff log.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct SledTreeOverlayStateDiff {
