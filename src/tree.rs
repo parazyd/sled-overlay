@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use sled::IVec;
 
 /// Struct representing [`SledTreeOverlay`] cache state.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct SledTreeOverlayState {
     /// The cache is the actual overlayed data represented as a [`BTreeMap`].
     pub cache: BTreeMap<IVec, IVec>,
@@ -134,14 +134,8 @@ impl SledTreeOverlayState {
     }
 }
 
-impl Default for SledTreeOverlayState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// Auxilliary struct representing a [`SledTreeOverlayState`] diff log.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct SledTreeOverlayStateDiff {
     /// Inserted data represented as a [`BTreeMap`].
     /// The value contains both the previous key value(if it existed), along
@@ -225,6 +219,24 @@ impl SledTreeOverlayStateDiff {
         }
 
         Some(batch)
+    }
+
+    /// Produces a [`SledTreeOverlayStateDiff`] containing the inverse
+    /// changes from our own.
+    pub fn inverse(&self) -> SledTreeOverlayStateDiff {
+        let mut diff = SledTreeOverlayStateDiff::default();
+
+        // This kind of first-insert-then-remove operation should be fine
+        // provided it's handled correctly in the above functions.
+        for (k, v) in self.removed.iter() {
+            diff.cache.insert(k.clone(), (None, v.clone()));
+        }
+
+        for (k, v) in self.cache.iter() {
+            diff.removed.insert(k.clone(), v.1.clone());
+        }
+
+        diff
     }
 
     /// Remove provided tree overlay state changes from our own.

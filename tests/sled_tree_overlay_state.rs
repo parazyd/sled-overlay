@@ -276,5 +276,104 @@ fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
     );
     assert_eq!(overlay.state, overlay2.state);
 
+    // Now we are going to apply each diff and check that sled
+    // has been mutated accordingly
+    let batch = sequence[0].aggregate().unwrap();
+    tree.apply_batch(batch)?;
+    db.flush()?;
+    assert_eq!(tree.len(), 2);
+    assert_eq!(tree.get(b"key_a")?, Some(b"val_a".into()));
+    assert_eq!(tree.get(b"key_b")?, Some(b"val_b".into()));
+    overlay.remove_diff2(&sequence[0]);
+
+    let batch = sequence[1].aggregate().unwrap();
+    tree.apply_batch(batch)?;
+    db.flush()?;
+    assert_eq!(tree.len(), 1);
+    assert_eq!(tree.get(b"key_a")?, None);
+    assert_eq!(tree.get(b"key_b")?, Some(b"val_bb".into()));
+    overlay.remove_diff2(&sequence[1]);
+
+    // Since we removed the diffs, current overlay diff must be
+    // the same as the last diff in the sequence
+    let diff = overlay.diff2(&[])?;
+    assert_eq!(diff, sequence[2]);
+    // Therefore we can safely use its batch
+    let batch = overlay.aggregate().unwrap();
+    tree.apply_batch(batch)?;
+    db.flush()?;
+    assert_eq!(tree.len(), 2);
+    assert_eq!(tree.get(b"key_a")?, Some(b"val_a".into()));
+    assert_eq!(tree.get(b"key_b")?, None);
+    assert_eq!(tree.get(b"key_c")?, Some(b"val_c".into()));
+    overlay.remove_diff2(&sequence[2]);
+
+    // Since we removed everything, current overlay must not have
+    // diffs over the tree, therefore its safe to keep using it
+    let diff = overlay.diff(&[]);
+    assert!(diff.cache.is_empty());
+    assert!(diff.removed.is_empty());
+    let diff = overlay.diff2(&[])?;
+    assert!(diff.cache.is_empty());
+    assert!(diff.removed.is_empty());
+
+    // Now we are going to add all the inverse diffs in the overlay,
+    // in reverse
+    overlay.add_diff2(&sequence[2].inverse());
+    assert_eq!(overlay.state.cache.len(), 1);
+    assert_eq!(
+        overlay.state.cache.get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"val_bb".into())
+    );
+    assert_eq!(overlay.state.removed.len(), 2);
+    assert_eq!(
+        overlay.state.removed.get::<sled::IVec>(&b"key_a".into()),
+        Some(&b"key_a".into())
+    );
+    assert_eq!(
+        overlay.state.removed.get::<sled::IVec>(&b"key_c".into()),
+        Some(&b"key_c".into())
+    );
+
+    overlay.add_diff2(&sequence[1].inverse());
+    assert_eq!(overlay.state.cache.len(), 1);
+    assert_eq!(
+        overlay.state.cache.get::<sled::IVec>(&b"key_a".into()),
+        Some(&b"val_a".into())
+    );
+    assert_eq!(overlay.state.removed.len(), 2);
+    assert_eq!(
+        overlay.state.removed.get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"key_b".into())
+    );
+    assert_eq!(
+        overlay.state.removed.get::<sled::IVec>(&b"key_c".into()),
+        Some(&b"key_c".into())
+    );
+
+    overlay.add_diff2(&sequence[0].inverse());
+    assert_eq!(overlay.state.cache.len(), 1);
+    assert_eq!(
+        overlay.state.cache.get::<sled::IVec>(&b"key_a".into()),
+        Some(&b"val_a".into())
+    );
+    assert_eq!(overlay.state.removed.len(), 2);
+    assert_eq!(
+        overlay.state.removed.get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"key_b".into())
+    );
+    assert_eq!(
+        overlay.state.removed.get::<sled::IVec>(&b"key_c".into()),
+        Some(&b"key_c".into())
+    );
+
+    // Now we are going to apply the overlay and verify that the
+    // Tree has now reverted to its original state
+    let batch = overlay.aggregate().unwrap();
+    tree.apply_batch(batch)?;
+    db.flush()?;
+    assert_eq!(tree.len(), 1);
+    assert_eq!(tree.get(b"key_a")?, Some(b"val_a".into()));
+
     Ok(())
 }
