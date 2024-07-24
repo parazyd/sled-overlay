@@ -275,7 +275,7 @@ impl SledTreeOverlayStateDiff {
 #[derive(Debug, Clone)]
 pub struct SledTreeOverlay {
     /// The [`sled::Tree`] that is being overlayed.
-    tree: sled::Tree,
+    pub tree: sled::Tree,
     /// Current overlay cache state
     pub state: SledTreeOverlayState,
     /// Checkpointed cache state to revert to

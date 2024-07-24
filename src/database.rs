@@ -30,8 +30,6 @@ pub struct SledDbOverlayState {
     pub initial_tree_names: Vec<IVec>,
     /// New trees that have been opened, but didn't exist in `db` before.
     pub new_tree_names: Vec<IVec>,
-    /// Pointers to sled trees that we have opened.
-    pub trees: BTreeMap<IVec, sled::Tree>,
     /// Pointers to [`SledTreeOverlay`] instances that have been created.
     pub caches: BTreeMap<IVec, SledTreeOverlay>,
     /// Trees that were dropped.
@@ -47,7 +45,6 @@ impl SledDbOverlayState {
         Self {
             initial_tree_names,
             new_tree_names: vec![],
-            trees: BTreeMap::new(),
             caches: BTreeMap::new(),
             dropped_tree_names: vec![],
             protected_tree_names,
@@ -61,17 +58,13 @@ impl SledDbOverlayState {
         let mut trees = vec![];
         let mut batches = vec![];
 
-        for (key, tree) in &self.trees {
+        for (key, cache) in self.caches.iter() {
             if self.dropped_tree_names.contains(key) {
                 return Err(sled::Error::CollectionNotFound(key.into()));
             }
 
-            let Some(cache) = self.caches.get(key) else {
-                return Err(sled::Error::CollectionNotFound(key.into()));
-            };
-
             if let Some(batch) = cache.aggregate() {
-                trees.push(tree.clone());
+                trees.push(cache.tree.clone());
                 batches.push(batch);
             }
         }
@@ -89,13 +82,6 @@ impl SledDbOverlayState {
                 continue;
             }
             self.new_tree_names.push(new_tree_name.clone());
-        }
-
-        for (k, v) in other.trees.iter() {
-            if self.trees.contains_key(k) {
-                continue;
-            };
-            self.trees.insert(k.clone(), v.clone());
         }
 
         for (k, v) in other.caches.iter() {
@@ -118,7 +104,6 @@ impl SledDbOverlayState {
                 continue;
             }
             self.new_tree_names.retain(|x| x != dropped_tree_name);
-            self.trees.remove(dropped_tree_name);
             self.caches.remove(dropped_tree_name);
             self.dropped_tree_names.push(dropped_tree_name.clone());
         }
@@ -136,14 +121,6 @@ impl SledDbOverlayState {
         for new_tree_name in &other.new_tree_names {
             self.new_tree_names.retain(|x| x != new_tree_name);
             self.initial_tree_names.push(new_tree_name.clone());
-        }
-
-        for tree in other.trees.keys() {
-            // If the tree pointer is not in our trees,
-            // it must exist in our dropped tree names
-            if !self.trees.contains_key(tree) {
-                assert!(self.dropped_tree_names.contains(tree));
-            };
         }
 
         for (k, v) in other.caches.iter() {
@@ -165,7 +142,6 @@ impl SledDbOverlayState {
                 }
 
                 // Drop the stale reference
-                self.trees.remove(k);
                 self.caches.remove(k);
                 continue;
             }
@@ -177,7 +153,6 @@ impl SledDbOverlayState {
         // Since we don't allow reopenning dropped trees, we must
         // have all the dropped tree names.
         for dropped_tree_name in &other.dropped_tree_names {
-            assert!(!self.trees.contains_key(dropped_tree_name));
             assert!(!self.caches.contains_key(dropped_tree_name));
             assert!(self.dropped_tree_names.contains(dropped_tree_name));
             self.dropped_tree_names.retain(|x| x != dropped_tree_name);
@@ -243,7 +218,7 @@ impl SledDbOverlay {
             return Err(sled::Error::CollectionNotFound(tree_key));
         }
 
-        if self.state.trees.contains_key(&tree_key) {
+        if self.state.caches.contains_key(&tree_key) {
             // We have already opened this tree.
             return Ok(());
         }
@@ -257,7 +232,6 @@ impl SledDbOverlay {
             self.state.new_tree_names.push(tree_key.clone());
         }
 
-        self.state.trees.insert(tree_key.clone(), tree);
         self.state.caches.insert(tree_key.clone(), cache);
 
         // Mark tree as protected if requested
@@ -287,7 +261,6 @@ impl SledDbOverlay {
         // Check if its a new tree we created
         if self.state.new_tree_names.contains(&tree_key) {
             self.state.new_tree_names.retain(|x| *x != tree_key);
-            self.state.trees.remove(&tree_key);
             self.state.caches.remove(&tree_key);
             self.state.dropped_tree_names.push(tree_key);
 
@@ -299,7 +272,6 @@ impl SledDbOverlay {
             return Err(sled::Error::CollectionNotFound(tree_key));
         }
 
-        self.state.trees.remove(&tree_key);
         self.state.caches.remove(&tree_key);
         self.state.dropped_tree_names.push(tree_key);
 
@@ -400,9 +372,12 @@ impl SledDbOverlay {
     /// After execution is successful, caller should *NOT* use the overlay again.
     pub fn apply(&mut self) -> Result<(), TransactionError<sled::Error>> {
         // Ensure new trees exist
-        for tree_key in &self.state.new_tree_names {
+        let new_tree_names = self.state.new_tree_names.clone();
+        for tree_key in &new_tree_names {
             let tree = self.db.open_tree(tree_key)?;
-            self.state.trees.insert(tree_key.clone(), tree);
+            // Update cache tree pointer, it must exist
+            let cache = self.get_cache_mut(tree_key)?;
+            cache.tree = tree;
         }
 
         // Drop removed trees
@@ -493,7 +468,9 @@ impl SledDbOverlay {
         // Ensure new trees exist
         for tree_key in &other.new_tree_names {
             let tree = self.db.open_tree(tree_key)?;
-            other.trees.insert(tree_key.clone(), tree);
+            // Update cache tree pointer, it must exist
+            let cache = other.caches.get_mut(tree_key).unwrap();
+            cache.tree = tree;
         }
 
         // Drop removed trees
