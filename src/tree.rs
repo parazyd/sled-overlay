@@ -172,7 +172,7 @@ impl SledTreeOverlayStateDiff {
 
         // Set inserted keys
         for (key, value) in state.cache.iter() {
-            // Grab each key previous value, if it existed.
+            // Grab each key previous value, if it existed
             let previous = tree.get::<IVec>(key.into())?;
             cache.insert(key.into(), (previous, value.into()));
         }
@@ -187,7 +187,25 @@ impl SledTreeOverlayStateDiff {
         Ok(Self { cache, removed })
     }
 
-    /// Aggregate all the current tree overlay state changes into
+    /// Instantiate a new [`SledTreeOverlayStateDiff`], over the provided
+    /// [`sled::Tree`] that is being dropped. The diff will contain all
+    /// existing tree keys in its cache as inserts, representing the last tree state.
+    pub fn new_dropped(tree: &sled::Tree) -> Self {
+        let mut cache = BTreeMap::new();
+
+        // Insert all tree keys
+        for record in tree.iter() {
+            let (key, value) = record.unwrap();
+            cache.insert(key, (None, value));
+        }
+
+        Self {
+            cache,
+            removed: BTreeMap::new(),
+        }
+    }
+
+    /// Aggregate all the tree overlay state changes into
     /// a [`sled::Batch`] ready for further operation.
     /// If there are no changes, return `None`.
     pub fn aggregate(&self) -> Option<sled::Batch> {
@@ -240,7 +258,7 @@ impl SledTreeOverlayStateDiff {
 
     /// Produces a [`SledTreeOverlayStateDiff`] containing the inverse
     /// changes from our own.
-    pub fn inverse(&self) -> SledTreeOverlayStateDiff {
+    pub fn inverse(&self) -> Self {
         let mut diff = SledTreeOverlayStateDiff::default();
 
         // This kind of first-insert-then-remove operation should be fine
@@ -250,6 +268,12 @@ impl SledTreeOverlayStateDiff {
         }
 
         for (k, v) in self.cache.iter() {
+            // If its value has been modified, flip it
+            if let Some(previous) = &v.0 {
+                diff.cache
+                    .insert(k.clone(), (Some(v.1.clone()), previous.clone()));
+                continue;
+            }
             diff.removed.insert(k.clone(), v.1.clone());
         }
 
@@ -284,6 +308,18 @@ impl SledTreeOverlayStateDiff {
             }
 
             self.removed.remove(k);
+        }
+    }
+
+    /// Update our cache key values to the ones in the provided
+    /// tree overlay state changes.
+    pub fn update_values(&mut self, other: &Self) {
+        for (k, v) in other.cache.iter() {
+            self.cache.insert(k.clone(), v.clone());
+        }
+
+        for k in other.removed.keys() {
+            self.cache.remove(k);
         }
     }
 }

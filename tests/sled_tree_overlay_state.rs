@@ -79,6 +79,7 @@ fn sled_tree_overlay_state() -> Result<(), sled::Error> {
         Some(&(None, b"val_b".into()))
     );
     assert!(sequence[0].removed.is_empty());
+    assert_eq!(sequence[0], sequence[0].inverse().inverse());
 
     assert_eq!(sequence[1].cache.len(), 1);
     assert_eq!(
@@ -90,6 +91,7 @@ fn sled_tree_overlay_state() -> Result<(), sled::Error> {
         sequence[1].removed.get::<sled::IVec>(&b"key_a".into()),
         Some(&b"val_a".into())
     );
+    assert_eq!(sequence[1], sequence[1].inverse().inverse());
 
     assert_eq!(sequence[2].cache.len(), 2);
     assert_eq!(
@@ -105,6 +107,7 @@ fn sled_tree_overlay_state() -> Result<(), sled::Error> {
         sequence[2].removed.get::<sled::IVec>(&b"key_b".into()),
         Some(&b"val_bb".into())
     );
+    assert_eq!(sequence[2], sequence[2].inverse().inverse());
 
     // Now we are going to apply each diff and check that sled
     // has been mutated accordingly
@@ -336,16 +339,16 @@ fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
     );
 
     overlay.add_diff2(&sequence[1].inverse());
-    assert_eq!(overlay.state.cache.len(), 1);
+    assert_eq!(overlay.state.cache.len(), 2);
     assert_eq!(
         overlay.state.cache.get::<sled::IVec>(&b"key_a".into()),
         Some(&b"val_a".into())
     );
-    assert_eq!(overlay.state.removed.len(), 2);
     assert_eq!(
-        overlay.state.removed.get::<sled::IVec>(&b"key_b".into()),
-        Some(&b"key_b".into())
+        overlay.state.cache.get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"val_b".into())
     );
+    assert_eq!(overlay.state.removed.len(), 1);
     assert_eq!(
         overlay.state.removed.get::<sled::IVec>(&b"key_c".into()),
         Some(&b"key_c".into())
