@@ -10,7 +10,7 @@ edition = "2021"
 [dependencies]
 sled = "0.34.7"
 
-# Darkfi serialization library
+# DarkFi serialization library
 darkfi-serial = {git = "https://codeberg.org/darkrenaissance/darkfi", optional = true}
 
 [dev-dependencies]
@@ -18,5 +18,6 @@ darkfi-serial = {git = "https://codeberg.org/darkrenaissance/darkfi", optional =
 smol = "2.0.0"
 
 [features]
+default = []
 async-serial = ["darkfi-serial/async"]
 serial = ["darkfi-serial"]

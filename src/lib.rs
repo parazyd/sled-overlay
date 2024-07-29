@@ -23,6 +23,8 @@
 //! This gives some minimal infrastructure to be able to transparently have
 //! rollback-like functionality.
 
+pub use sled;
+
 pub mod tree;
 pub use tree::{SledTreeOverlay, SledTreeOverlayState, SledTreeOverlayStateDiff};
 
@@ -32,5 +34,11 @@ pub use database::{SledDbOverlay, SledDbOverlayStateDiff};
 #[cfg(feature = "async-serial")]
 pub mod async_serial;
 
+#[cfg(feature = "async-serial")]
+pub use darkfi_serial;
+
 #[cfg(feature = "serial")]
 pub mod serial;
+
+#[cfg(feature = "serial")]
+pub use darkfi_serial;
