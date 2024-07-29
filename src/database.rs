@@ -75,7 +75,7 @@ impl SledDbOverlayState {
     }
 
     /// Add provided `db` overlay state changes to our own.
-    pub fn add_diff2(
+    pub fn add_diff(
         &mut self,
         db: &sled::Db,
         diff: &SledDbOverlayStateDiff,
@@ -97,13 +97,13 @@ impl SledDbOverlayState {
                     self.new_tree_names.push(k.clone());
                 }
                 let mut overlay = SledTreeOverlay::new(&db.open_tree(k)?);
-                overlay.add_diff2(cache);
+                overlay.add_diff(cache);
                 self.caches.insert(k.clone(), overlay);
                 continue;
             };
 
             // Add the diff to our tree overlay state
-            tree_overlay.add_diff2(cache);
+            tree_overlay.add_diff(cache);
         }
 
         for (k, (cache, restored)) in &diff.dropped_trees {
@@ -126,52 +126,15 @@ impl SledDbOverlayState {
             }
 
             let mut overlay = SledTreeOverlay::new(&db.open_tree(k)?);
-            overlay.add_diff2(cache);
+            overlay.add_diff(cache);
             self.caches.insert(k.clone(), overlay);
         }
 
         Ok(())
     }
 
-    /// Add provided `db` overlay state changes to our own.
-    pub fn add_diff(&mut self, other: &Self) {
-        self.initial_tree_names
-            .retain(|x| other.initial_tree_names.contains(x));
-
-        for new_tree_name in &other.new_tree_names {
-            if self.new_tree_names.contains(new_tree_name) {
-                continue;
-            }
-            self.new_tree_names.push(new_tree_name.clone());
-        }
-
-        for (k, v) in other.caches.iter() {
-            let Some(tree_overlay) = self.caches.get_mut(k) else {
-                self.caches.insert(k.clone(), v.clone());
-                continue;
-            };
-
-            // If the state is unchanged, we skip it
-            if tree_overlay.state == v.state {
-                continue;
-            }
-
-            // Add the diff to our tree overlay state
-            tree_overlay.add_diff(&v.state);
-        }
-
-        for (k, v) in &other.dropped_trees {
-            if self.dropped_trees.contains_key(k) {
-                continue;
-            }
-            self.new_tree_names.retain(|x| x != k);
-            self.caches.remove(k);
-            self.dropped_trees.insert(k.clone(), v.clone());
-        }
-    }
-
     /// Remove provided `db` overlay state changes from our own.
-    pub fn remove_diff2(&mut self, diff: &SledDbOverlayStateDiff) {
+    pub fn remove_diff(&mut self, diff: &SledDbOverlayStateDiff) {
         // We have some assertions here to catch catastrophic
         // logic bugs here, as all our fields are depending on each
         // other when checking for differences.
@@ -223,7 +186,7 @@ impl SledDbOverlayState {
             }
 
             // Remove the diff from our tree overlay state
-            tree_overlay.remove_diff2(cache);
+            tree_overlay.remove_diff(cache);
         }
 
         // Now we handle the dropped trees
@@ -272,64 +235,8 @@ impl SledDbOverlayState {
             }
 
             // Remove the diff from our tree overlay state
-            tree_overlay.remove_diff2(cache);
+            tree_overlay.remove_diff(cache);
         }
-    }
-
-    /// Remove provided `db` overlay state changes from our own.
-    pub fn remove_diff(&mut self, other: &Self) {
-        // We have some assertions here to catch catastrophic
-        // logic bugs here, as all our fields are depending on each
-        // other when checking for differences.
-        for initial_tree_name in &other.initial_tree_names {
-            assert!(self.initial_tree_names.contains(initial_tree_name));
-        }
-
-        for new_tree_name in &other.new_tree_names {
-            self.new_tree_names.retain(|x| x != new_tree_name);
-            self.initial_tree_names.push(new_tree_name.clone());
-        }
-
-        for (k, v) in other.caches.iter() {
-            // If the key is not in the cache, it must
-            // be in the dropped trees
-            let Some(tree_overlay) = self.caches.get_mut(k) else {
-                assert!(self.dropped_trees.contains_key(k));
-                continue;
-            };
-
-            // If the state is unchanged, handle the stale tree
-            if tree_overlay.state == v.state {
-                // If tree is protected, we simply reset its cache
-                if self.protected_tree_names.contains(k) {
-                    tree_overlay.state.cache = BTreeMap::new();
-                    tree_overlay.state.removed = BTreeSet::new();
-                    tree_overlay.checkpoint();
-                    continue;
-                }
-
-                // Drop the stale reference
-                self.caches.remove(k);
-                continue;
-            }
-
-            // Remove the diff from our tree overlay state
-            tree_overlay.remove_diff(&v.state);
-        }
-
-        // Since we don't allow reopenning dropped trees, we must
-        // have all the dropped trees.
-        for dropped_tree_name in other.dropped_trees.keys() {
-            assert!(!self.caches.contains_key(dropped_tree_name));
-            assert!(self.dropped_trees.contains_key(dropped_tree_name));
-            self.dropped_trees.remove(dropped_tree_name);
-            self.initial_tree_names.retain(|x| x != dropped_tree_name);
-        }
-
-        assert_eq!(
-            self.initial_tree_names.len(),
-            other.initial_tree_names.len() + other.new_tree_names.len() - other.dropped_trees.len()
-        );
     }
 }
 
@@ -366,7 +273,7 @@ impl SledDbOverlayStateDiff {
         let mut dropped_trees = BTreeMap::new();
 
         for (key, cache) in state.caches.iter() {
-            let mut diff = cache.diff2(&[])?;
+            let mut diff = cache.diff(&[])?;
 
             // Skip if diff is empty
             if diff.cache.is_empty() && diff.removed.is_empty() {
@@ -793,7 +700,7 @@ impl SledDbOverlay {
     /// consecutive individual changes performed over the current
     /// overlay state. If the sequence is empty, current state
     /// is returned as the diff.
-    pub fn diff2(
+    pub fn diff(
         &self,
         sequence: &[SledDbOverlayStateDiff],
     ) -> Result<SledDbOverlayStateDiff, sled::Error> {
@@ -808,41 +715,14 @@ impl SledDbOverlay {
         Ok(current)
     }
 
-    /// Calculate differences from provided overlay state changes
-    /// sequence. This can be used when we want to keep track of
-    /// consecutive individual changes performed over the current
-    /// overlay state. If the sequence is empty, current state
-    /// is returned as the diff.
-    pub fn diff(&self, sequence: &[SledDbOverlayState]) -> SledDbOverlayState {
-        // Grab current state
-        let mut current = self.state.clone();
-
-        // Remove provided diffs sequence
-        for diff in sequence {
-            current.remove_diff(diff);
-        }
-
-        current
-    }
-
     /// Add provided `db` overlay state changes from our own.
-    pub fn add_diff2(&mut self, diff: &SledDbOverlayStateDiff) -> Result<(), sled::Error> {
-        self.state.add_diff2(&self.db, diff)
-    }
-
-    /// Add provided `db` overlay state changes from our own.
-    pub fn add_diff(&mut self, other: &SledDbOverlayState) {
-        self.state.add_diff(other)
+    pub fn add_diff(&mut self, diff: &SledDbOverlayStateDiff) -> Result<(), sled::Error> {
+        self.state.add_diff(&self.db, diff)
     }
 
     /// Remove provided `db` overlay state changes from our own.
-    pub fn remove_diff2(&mut self, diff: &SledDbOverlayStateDiff) {
-        self.state.remove_diff2(diff)
-    }
-
-    /// Remove provided `db` overlay state changes from our own.
-    pub fn remove_diff(&mut self, other: &SledDbOverlayState) {
-        self.state.remove_diff(other)
+    pub fn remove_diff(&mut self, diff: &SledDbOverlayStateDiff) {
+        self.state.remove_diff(diff)
     }
 
     /// For a provided `SledDbOverlayStateDiff`, ensure all trees exist in sled by
@@ -852,7 +732,7 @@ impl SledDbOverlay {
     /// and/or dropped. This function **does not** perform a db flush. This should be
     /// done externally, since then there is a choice to perform either blocking or
     /// async IO.
-    pub fn apply_diff2(
+    pub fn apply_diff(
         &mut self,
         diff: &SledDbOverlayStateDiff,
     ) -> Result<(), TransactionError<sled::Error>> {
@@ -921,7 +801,7 @@ impl SledDbOverlay {
         // Aggregate batches
         let (trees, batches) = diff.aggregate(&state_trees)?;
         if trees.is_empty() {
-            self.remove_diff2(diff);
+            self.remove_diff(diff);
             return Ok(());
         }
 
@@ -936,62 +816,7 @@ impl SledDbOverlay {
         })?;
 
         // Remove changes from our current state
-        self.remove_diff2(diff);
-
-        Ok(())
-    }
-
-    /// For a provided `SledDbOverlayState`, ensure all new trees that have been
-    /// opened exist in sled by reopening them, atomically apply all batches on
-    /// all trees as a transaction, and drop dropped trees from sled.
-    /// After that, remove the state changes from our own. This is will also mutate
-    /// the initial trees, based on what was oppened and/or dropped.
-    /// This function **does not** perform a db flush. This should be done externally,
-    /// since then there is a choice to perform either blocking or async IO.
-    pub fn apply_diff(
-        &mut self,
-        other: &mut SledDbOverlayState,
-    ) -> Result<(), TransactionError<sled::Error>> {
-        // We ensure that the diff doesn't try to drop any of our protected trees
-        for tree in other.dropped_trees.keys() {
-            if self.state.protected_tree_names.contains(tree) {
-                return Err(TransactionError::Storage(sled::Error::Unsupported(
-                    "Protected tree can't be dropped".to_string(),
-                )));
-            }
-        }
-
-        // Ensure new trees exist
-        for tree_key in &other.new_tree_names {
-            let tree = self.db.open_tree(tree_key)?;
-            // Update cache tree pointer, it must exist
-            let cache = other.caches.get_mut(tree_key).unwrap();
-            cache.tree = tree;
-        }
-
-        // Drop removed trees
-        for tree in other.dropped_trees.keys() {
-            self.db.drop_tree(tree)?;
-        }
-
-        // Aggregate batches
-        let (trees, batches) = other.aggregate()?;
-        if trees.is_empty() {
-            return Ok(());
-        }
-
-        // Perform an atomic transaction over all the collected trees and
-        // apply the batches.
-        trees.transaction(|trees| {
-            for (index, tree) in trees.iter().enumerate() {
-                tree.apply_batch(&batches[index])?;
-            }
-
-            Ok::<(), ConflictableTransactionError<sled::Error>>(())
-        })?;
-
-        // Remove changes from our current state
-        self.remove_diff(other);
+        self.remove_diff(diff);
 
         Ok(())
     }

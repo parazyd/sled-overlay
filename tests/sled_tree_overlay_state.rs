@@ -43,16 +43,16 @@ fn sled_tree_overlay_state() -> Result<(), sled::Error> {
 
     // Perform some changes and grab their differences
     overlay.insert(b"key_b", b"val_b")?;
-    sequence.push(overlay.diff2(&sequence)?);
+    sequence.push(overlay.diff(&sequence)?);
 
     overlay.insert(b"key_b", b"val_bb")?;
     overlay.remove(b"key_a")?;
-    sequence.push(overlay.diff2(&sequence)?);
+    sequence.push(overlay.diff(&sequence)?);
 
     overlay.insert(b"key_a", b"val_a")?;
     overlay.remove(b"key_b")?;
     overlay.insert(b"key_c", b"val_c")?;
-    sequence.push(overlay.diff2(&sequence)?);
+    sequence.push(overlay.diff(&sequence)?);
 
     // Verify overlay has the correct state
     assert_eq!(overlay.state.cache.len(), 2);
@@ -117,7 +117,7 @@ fn sled_tree_overlay_state() -> Result<(), sled::Error> {
     assert_eq!(tree.len(), 2);
     assert_eq!(tree.get(b"key_a")?, Some(b"val_a".into()));
     assert_eq!(tree.get(b"key_b")?, Some(b"val_b".into()));
-    overlay.remove_diff2(&sequence[0]);
+    overlay.remove_diff(&sequence[0]);
 
     let batch = sequence[1].aggregate().unwrap();
     tree.apply_batch(batch)?;
@@ -125,11 +125,11 @@ fn sled_tree_overlay_state() -> Result<(), sled::Error> {
     assert_eq!(tree.len(), 1);
     assert_eq!(tree.get(b"key_a")?, None);
     assert_eq!(tree.get(b"key_b")?, Some(b"val_bb".into()));
-    overlay.remove_diff2(&sequence[1]);
+    overlay.remove_diff(&sequence[1]);
 
     // Since we removed the diffs, current overlay diff must be
     // the same as the last diff in the sequence
-    let diff = overlay.diff2(&[])?;
+    let diff = overlay.diff(&[])?;
     assert_eq!(diff, sequence[2]);
     // Therefore we can safely use its batch
     let batch = overlay.aggregate().unwrap();
@@ -139,14 +139,11 @@ fn sled_tree_overlay_state() -> Result<(), sled::Error> {
     assert_eq!(tree.get(b"key_a")?, Some(b"val_a".into()));
     assert_eq!(tree.get(b"key_b")?, None);
     assert_eq!(tree.get(b"key_c")?, Some(b"val_c".into()));
-    overlay.remove_diff2(&sequence[2]);
+    overlay.remove_diff(&sequence[2]);
 
     // Since we removed everything, current overlay must not have
     // diffs over the tree, therefore its safe to keep using it
-    let diff = overlay.diff(&[]);
-    assert!(diff.cache.is_empty());
-    assert!(diff.removed.is_empty());
-    let diff = overlay.diff2(&[])?;
+    let diff = overlay.diff(&[])?;
     assert!(diff.cache.is_empty());
     assert!(diff.removed.is_empty());
 
@@ -157,7 +154,7 @@ fn sled_tree_overlay_state() -> Result<(), sled::Error> {
     overlay.remove(b"key_c")?;
 
     // Grab the diff, apply it and verify tree state
-    let diff = overlay.diff2(&[])?;
+    let diff = overlay.diff(&[])?;
     let batch = diff.aggregate().unwrap();
     tree.apply_batch(batch)?;
     db.flush()?;
@@ -220,18 +217,18 @@ fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
 
     // Perform some changes and grab their differences
     overlay.insert(b"key_b", b"val_b")?;
-    sequence.push(overlay.diff2(&sequence)?);
+    sequence.push(overlay.diff(&sequence)?);
     state_sequence.push(overlay.clone());
 
     overlay.insert(b"key_b", b"val_bb")?;
     overlay.remove(b"key_a")?;
-    sequence.push(overlay.diff2(&sequence)?);
+    sequence.push(overlay.diff(&sequence)?);
     state_sequence.push(overlay.clone());
 
     overlay.insert(b"key_a", b"val_a")?;
     overlay.remove(b"key_b")?;
     overlay.insert(b"key_c", b"val_c")?;
-    sequence.push(overlay.diff2(&sequence)?);
+    sequence.push(overlay.diff(&sequence)?);
 
     // Create a different overlay to rebuild
     // the previous one using the changes sequence
@@ -240,7 +237,7 @@ fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
 
     // Add each diff from the sequence and verify
     // overlay has been mutated accordingly
-    overlay2.add_diff2(&sequence[0]);
+    overlay2.add_diff(&sequence[0]);
     assert_eq!(overlay2.state.cache.len(), 1);
     assert_eq!(
         overlay2.state.cache.get::<sled::IVec>(&b"key_b".into()),
@@ -249,7 +246,7 @@ fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
     assert!(overlay2.state.removed.is_empty());
     assert_eq!(state_sequence[0].state, overlay2.state);
 
-    overlay2.add_diff2(&sequence[1]);
+    overlay2.add_diff(&sequence[1]);
     assert_eq!(overlay2.state.cache.len(), 1);
     assert_eq!(
         overlay2.state.cache.get::<sled::IVec>(&b"key_b".into()),
@@ -262,7 +259,7 @@ fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
     );
     assert_eq!(state_sequence[1].state, overlay2.state);
 
-    overlay2.add_diff2(&sequence[2]);
+    overlay2.add_diff(&sequence[2]);
     assert_eq!(overlay2.state.cache.len(), 2);
     assert_eq!(
         overlay2.state.cache.get::<sled::IVec>(&b"key_a".into()),
@@ -287,7 +284,7 @@ fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
     assert_eq!(tree.len(), 2);
     assert_eq!(tree.get(b"key_a")?, Some(b"val_a".into()));
     assert_eq!(tree.get(b"key_b")?, Some(b"val_b".into()));
-    overlay.remove_diff2(&sequence[0]);
+    overlay.remove_diff(&sequence[0]);
 
     let batch = sequence[1].aggregate().unwrap();
     tree.apply_batch(batch)?;
@@ -295,11 +292,11 @@ fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
     assert_eq!(tree.len(), 1);
     assert_eq!(tree.get(b"key_a")?, None);
     assert_eq!(tree.get(b"key_b")?, Some(b"val_bb".into()));
-    overlay.remove_diff2(&sequence[1]);
+    overlay.remove_diff(&sequence[1]);
 
     // Since we removed the diffs, current overlay diff must be
     // the same as the last diff in the sequence
-    let diff = overlay.diff2(&[])?;
+    let diff = overlay.diff(&[])?;
     assert_eq!(diff, sequence[2]);
     // Therefore we can safely use its batch
     let batch = overlay.aggregate().unwrap();
@@ -309,20 +306,17 @@ fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
     assert_eq!(tree.get(b"key_a")?, Some(b"val_a".into()));
     assert_eq!(tree.get(b"key_b")?, None);
     assert_eq!(tree.get(b"key_c")?, Some(b"val_c".into()));
-    overlay.remove_diff2(&sequence[2]);
+    overlay.remove_diff(&sequence[2]);
 
     // Since we removed everything, current overlay must not have
     // diffs over the tree, therefore its safe to keep using it
-    let diff = overlay.diff(&[]);
-    assert!(diff.cache.is_empty());
-    assert!(diff.removed.is_empty());
-    let diff = overlay.diff2(&[])?;
+    let diff = overlay.diff(&[])?;
     assert!(diff.cache.is_empty());
     assert!(diff.removed.is_empty());
 
     // Now we are going to add all the inverse diffs in the overlay,
     // in reverse
-    overlay.add_diff2(&sequence[2].inverse());
+    overlay.add_diff(&sequence[2].inverse());
     assert_eq!(overlay.state.cache.len(), 1);
     assert_eq!(
         overlay.state.cache.get::<sled::IVec>(&b"key_b".into()),
@@ -338,7 +332,7 @@ fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
         Some(&b"key_c".into())
     );
 
-    overlay.add_diff2(&sequence[1].inverse());
+    overlay.add_diff(&sequence[1].inverse());
     assert_eq!(overlay.state.cache.len(), 2);
     assert_eq!(
         overlay.state.cache.get::<sled::IVec>(&b"key_a".into()),
@@ -354,7 +348,7 @@ fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
         Some(&b"key_c".into())
     );
 
-    overlay.add_diff2(&sequence[0].inverse());
+    overlay.add_diff(&sequence[0].inverse());
     assert_eq!(overlay.state.cache.len(), 1);
     assert_eq!(
         overlay.state.cache.get::<sled::IVec>(&b"key_a".into()),

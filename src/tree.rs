@@ -62,7 +62,7 @@ impl SledTreeOverlayState {
     }
 
     /// Add provided tree overlay state changes to our own.
-    pub fn add_diff2(&mut self, diff: &SledTreeOverlayStateDiff) {
+    pub fn add_diff(&mut self, diff: &SledTreeOverlayStateDiff) {
         // Add all new keys into cache
         for (k, v) in diff.cache.iter() {
             self.removed.remove(k);
@@ -76,23 +76,8 @@ impl SledTreeOverlayState {
         }
     }
 
-    /// Add provided tree overlay state changes to our own.
-    pub fn add_diff(&mut self, other: &Self) {
-        // Add all new keys into cache
-        for (k, v) in other.cache.iter() {
-            self.removed.remove(k);
-            self.cache.insert(k.clone(), v.clone());
-        }
-
-        // Remove dropped keys
-        for k in other.removed.iter() {
-            self.cache.remove(k);
-            self.removed.insert(k.clone());
-        }
-    }
-
     /// Remove provided tree overlay state changes from our own.
-    pub fn remove_diff2(&mut self, diff: &SledTreeOverlayStateDiff) {
+    pub fn remove_diff(&mut self, diff: &SledTreeOverlayStateDiff) {
         for (k, v) in diff.cache.iter() {
             // Skip if its not in cache
             let Some(value) = self.cache.get(k) else {
@@ -108,27 +93,6 @@ impl SledTreeOverlayState {
         }
 
         for k in diff.removed.keys() {
-            self.removed.remove(k);
-        }
-    }
-
-    /// Remove provided tree overlay state changes from our own.
-    pub fn remove_diff(&mut self, other: &Self) {
-        for (k, v) in other.cache.iter() {
-            // Skip if its not in cache
-            let Some(value) = self.cache.get(k) else {
-                continue;
-            };
-
-            // Check if its value has been modified again
-            if v != value {
-                continue;
-            }
-
-            self.cache.remove(k);
-        }
-
-        for k in other.removed.iter() {
             self.removed.remove(k);
         }
     }
@@ -329,9 +293,9 @@ impl SledTreeOverlayStateDiff {
 pub struct SledTreeOverlay {
     /// The [`sled::Tree`] that is being overlayed.
     pub tree: sled::Tree,
-    /// Current overlay cache state
+    /// Current overlay cache state.
     pub state: SledTreeOverlayState,
-    /// Checkpointed cache state to revert to
+    /// Checkpointed cache state to revert to.
     checkpoint: SledTreeOverlayState,
 }
 
@@ -506,7 +470,7 @@ impl SledTreeOverlay {
     /// consecutive individual changes performed over the current
     /// overlay state. If the sequence is empty, current state
     /// is returned as the diff.
-    pub fn diff2(
+    pub fn diff(
         &self,
         sequence: &[SledTreeOverlayStateDiff],
     ) -> Result<SledTreeOverlayStateDiff, sled::Error> {
@@ -521,40 +485,13 @@ impl SledTreeOverlay {
         Ok(current)
     }
 
-    /// Calculate differences from provided overlay state changes
-    /// sequence. This can be used when we want to keep track of
-    /// consecutive individual changes performed over the current
-    /// overlay state. If the sequence is empty, current state
-    /// is returned as the diff.
-    pub fn diff(&self, sequence: &[SledTreeOverlayState]) -> SledTreeOverlayState {
-        // Grab current state
-        let mut current = self.state.clone();
-
-        // Remove provided diffs sequence
-        for diff in sequence {
-            current.remove_diff(diff);
-        }
-
-        current
-    }
-
     /// Add provided tree overlay state changes from our own.
-    pub fn add_diff2(&mut self, diff: &SledTreeOverlayStateDiff) {
-        self.state.add_diff2(diff)
-    }
-
-    /// Add provided tree overlay state changes from our own.
-    pub fn add_diff(&mut self, other: &SledTreeOverlayState) {
-        self.state.add_diff(other)
+    pub fn add_diff(&mut self, diff: &SledTreeOverlayStateDiff) {
+        self.state.add_diff(diff)
     }
 
     /// Remove provided tree overlay state changes from our own.
-    pub fn remove_diff2(&mut self, diff: &SledTreeOverlayStateDiff) {
-        self.state.remove_diff2(diff)
-    }
-
-    /// Remove provided tree overlay state changes from our own.
-    pub fn remove_diff(&mut self, other: &SledTreeOverlayState) {
-        self.state.remove_diff(other)
+    pub fn remove_diff(&mut self, diff: &SledTreeOverlayStateDiff) {
+        self.state.remove_diff(diff)
     }
 }
