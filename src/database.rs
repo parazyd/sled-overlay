@@ -638,7 +638,6 @@ impl SledDbOverlay {
     /// since then there is a choice to perform either blocking or async IO.
     /// After execution is successful, caller should *NOT* use the overlay again.
     pub fn apply(&mut self) -> Result<(), TransactionError<sled::Error>> {
-        // TODO: add tree drops and updates into a single transaction
         // Ensure new trees exist
         let new_tree_names = self.state.new_tree_names.clone();
         for tree_key in &new_tree_names {
@@ -736,7 +735,6 @@ impl SledDbOverlay {
         &mut self,
         diff: &SledDbOverlayStateDiff,
     ) -> Result<(), TransactionError<sled::Error>> {
-        // TODO: add tree drops and updates into a single transaction
         // We assert that the diff doesn't try to drop any of our protected trees
         for tree in diff.dropped_trees.keys() {
             if self.state.protected_tree_names.contains(tree) {
