@@ -310,8 +310,8 @@ impl SledDbOverlayStateDiff {
         let mut trees = vec![];
         let mut batches = vec![];
 
-        for (key, cache) in self.caches.iter() {
-            if cache.1 {
+        for (key, (cache, drop)) in self.caches.iter() {
+            if *drop {
                 continue;
             }
 
@@ -319,7 +319,7 @@ impl SledDbOverlayStateDiff {
                 return Err(sled::Error::CollectionNotFound(key.into()));
             };
 
-            if let Some(batch) = cache.0.aggregate() {
+            if let Some(batch) = cache.aggregate() {
                 trees.push(tree.clone());
                 batches.push(batch);
             }
@@ -346,22 +346,23 @@ impl SledDbOverlayStateDiff {
     /// Produces a [`SledDbOverlayStateDiff`] containing the inverse
     /// changes from our own.
     pub fn inverse(&self) -> Self {
-        let mut diff = SledDbOverlayStateDiff {
+        let mut diff = Self {
             initial_tree_names: self.initial_tree_names.clone(),
             ..Default::default()
         };
 
-        for (k, v) in self.caches.iter() {
-            let inverse = v.0.inverse();
-            let drop = inverse.cache.is_empty() && !self.initial_tree_names.contains(k);
-            diff.caches.insert(k.clone(), (inverse, drop));
+        for (key, (cache, _)) in self.caches.iter() {
+            let inverse = cache.inverse();
+            let drop = inverse.cache.is_empty() && !self.initial_tree_names.contains(key);
+            diff.caches.insert(key.clone(), (inverse, drop));
         }
 
-        for (k, v) in self.dropped_trees.iter() {
-            if !self.initial_tree_names.contains(k) {
+        for (key, (cache, restored)) in self.dropped_trees.iter() {
+            if !self.initial_tree_names.contains(key) {
                 continue;
             }
-            diff.dropped_trees.insert(k.clone(), (v.0.clone(), !v.1));
+            diff.dropped_trees
+                .insert(key.clone(), (cache.clone(), !restored));
         }
 
         diff
@@ -377,44 +378,44 @@ impl SledDbOverlayStateDiff {
         }
 
         // First we remove each cache diff
-        for (k, v) in other.caches.iter() {
-            if !self.initial_tree_names.contains(k) {
-                self.initial_tree_names.push(k.clone());
+        for (key, cache_pair) in other.caches.iter() {
+            if !self.initial_tree_names.contains(key) {
+                self.initial_tree_names.push(key.clone());
             }
             // If the key is not in the cache, it must
             // be in the dropped trees, so we update its
             // values.
-            let Some(tree_overlay) = self.caches.get_mut(k) else {
-                let (tree_overlay, _) = self.dropped_trees.get_mut(k).unwrap();
-                tree_overlay.update_values(&v.0);
+            let Some(tree_overlay) = self.caches.get_mut(key) else {
+                let (tree_overlay, _) = self.dropped_trees.get_mut(key).unwrap();
+                tree_overlay.update_values(&cache_pair.0);
                 continue;
             };
 
             // If the state is unchanged, handle the stale tree
-            if tree_overlay == v {
+            if tree_overlay == cache_pair {
                 // Drop the stale reference
-                self.caches.remove(k);
+                self.caches.remove(key);
                 continue;
             }
 
             // Remove the diff from our tree overlay state
-            tree_overlay.0.remove_diff(&v.0);
+            tree_overlay.0.remove_diff(&cache_pair.0);
         }
 
         // Now we handle the dropped trees. We must have all
         // the keys in our dropped trees keys.
-        for (k, v) in other.dropped_trees.iter() {
-            assert!(!self.caches.contains_key(k));
-            assert!(self.dropped_trees.contains_key(k));
+        for (key, (cache, restored)) in other.dropped_trees.iter() {
+            assert!(!self.caches.contains_key(key));
+            assert!(self.dropped_trees.contains_key(key));
 
             // Restore tree if its flag is set to true
-            if v.1 {
-                self.caches.insert(k.clone(), (v.0.clone(), false));
+            if *restored {
+                self.caches.insert(key.clone(), (cache.clone(), false));
             }
 
             // Drop the tree
-            self.initial_tree_names.retain(|x| x != k);
-            self.dropped_trees.remove(k);
+            self.initial_tree_names.retain(|x| x != key);
+            self.dropped_trees.remove(key);
         }
     }
 }

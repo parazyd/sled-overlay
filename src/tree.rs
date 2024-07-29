@@ -223,7 +223,7 @@ impl SledTreeOverlayStateDiff {
     /// Produces a [`SledTreeOverlayStateDiff`] containing the inverse
     /// changes from our own.
     pub fn inverse(&self) -> Self {
-        let mut diff = SledTreeOverlayStateDiff::default();
+        let mut diff = Self::default();
 
         // This kind of first-insert-then-remove operation should be fine
         // provided it's handled correctly in the above functions.
