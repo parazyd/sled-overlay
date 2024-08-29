@@ -8,16 +8,19 @@ license = "AGPL-3.0-only"
 edition = "2021"
 
 [dependencies]
-sled = "0.34.7"
+sled = "0.34"
 
 # DarkFi serialization library
-darkfi-serial = {git = "https://codeberg.org/darkrenaissance/darkfi", optional = true}
+darkfi-serial = {version = "0.4", optional = true}
 
 [dev-dependencies]
 # To execute async tests
-smol = "2.0.0"
+smol = "2"
 
 [features]
 default = []
 async-serial = ["serial", "darkfi-serial/async"]
 serial = ["darkfi-serial"]
+
+[patch.crates-io]
+darkfi-serial = {git = "https://codeberg.org/darkrenaissance/darkfi", branch = "master"}
