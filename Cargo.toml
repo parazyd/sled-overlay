@@ -19,5 +19,5 @@ smol = "2.0.0"
 
 [features]
 default = []
-async-serial = ["darkfi-serial/async"]
+async-serial = ["serial", "darkfi-serial/async"]
 serial = ["darkfi-serial"]
