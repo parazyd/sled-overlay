@@ -1,6 +1,6 @@
 [package]
 name = "sled-overlay"
-version = "0.1.3"
+version = "0.1.4"
 description = "Overlay mechanism for sled"
 repository = "https://github.com/parazyd/sled-overlay"
 authors = ["Dyne.org foundation <foundation@dyne.org>"]
@@ -21,6 +21,3 @@ smol = "2"
 default = []
 async-serial = ["serial", "darkfi-serial/async"]
 serial = ["darkfi-serial"]
-
-[patch.crates-io]
-darkfi-serial = {git = "https://codeberg.org/darkrenaissance/darkfi", branch = "master"}
