@@ -359,8 +359,21 @@ impl SledTreeOverlay {
             // tree and cache are empty.
             let record = tree_last.unwrap();
 
-            // Return None if its removed
+            // Check if record is removed
             if self.state.removed.contains(&record.0) {
+                // Find last existing record
+                let mut key = record.0.clone();
+                while let Some(record) = self.tree.get_lt(key)? {
+                    // Check if record is removed
+                    if self.state.removed.contains(&record.0) {
+                        key = record.0;
+                        continue;
+                    }
+                    // Return it
+                    return Ok(Some((record.0.clone(), record.1.clone())));
+                }
+
+                // Return None if no records exist
                 return Ok(None);
             }
 
