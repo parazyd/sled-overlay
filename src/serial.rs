@@ -21,7 +21,8 @@ use std::{
     io::{Read, Result, Write},
 };
 
-use darkfi_serial::{Decodable, Encodable, VarInt};
+use darkfi_serial::{deserialize, Decodable, Encodable, VarInt};
+use sled::IVec;
 
 use crate::{SledDbOverlayStateDiff, SledTreeOverlayStateDiff};
 
@@ -130,4 +131,32 @@ impl Decodable for SledDbOverlayStateDiff {
             dropped_trees,
         })
     }
+}
+
+/// Parse a sled record in the form of a tuple (`key`, `value`).
+pub fn parse_record<T1: Decodable, T2: Decodable>(record: (IVec, IVec)) -> Result<(T1, T2)> {
+    let key = deserialize(&record.0)?;
+    let value = deserialize(&record.1)?;
+
+    Ok((key, value))
+}
+
+/// Parse a sled record with a u32 key, encoded in Big Endian bytes,
+/// in the form of a tuple (`key`, `value`).
+pub fn parse_u32_key_record<T: Decodable>(record: (IVec, IVec)) -> Result<(u32, T)> {
+    let key_bytes: [u8; 4] = record.0.as_ref().try_into().unwrap();
+    let key = u32::from_be_bytes(key_bytes);
+    let value = deserialize(&record.1)?;
+
+    Ok((key, value))
+}
+
+/// Parse a sled record with a u64 key, encoded in Big Endian bytes,
+/// in the form of a tuple (`key`, `value`).
+pub fn parse_u64_key_record<T: Decodable>(record: (IVec, IVec)) -> Result<(u64, T)> {
+    let key_bytes: [u8; 8] = record.0.as_ref().try_into().unwrap();
+    let key = u64::from_be_bytes(key_bytes);
+    let value = deserialize(&record.1)?;
+
+    Ok((key, value))
 }

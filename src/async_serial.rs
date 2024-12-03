@@ -18,7 +18,10 @@
 
 use std::{collections::BTreeMap, io::Result};
 
-use darkfi_serial::{async_trait, AsyncDecodable, AsyncEncodable, AsyncRead, AsyncWrite, VarInt};
+use darkfi_serial::{
+    async_trait, deserialize_async, AsyncDecodable, AsyncEncodable, AsyncRead, AsyncWrite, VarInt,
+};
+use sled::IVec;
 
 use crate::{SledDbOverlayStateDiff, SledTreeOverlayStateDiff};
 
@@ -136,4 +139,38 @@ impl AsyncDecodable for SledDbOverlayStateDiff {
             dropped_trees,
         })
     }
+}
+
+/// Parse a sled record in the form of a tuple (`key`, `value`).
+pub async fn parse_record_async<T1: AsyncDecodable, T2: AsyncDecodable>(
+    record: (IVec, IVec),
+) -> Result<(T1, T2)> {
+    let key = deserialize_async(&record.0).await?;
+    let value = deserialize_async(&record.1).await?;
+
+    Ok((key, value))
+}
+
+/// Parse a sled record with a u32 key, encoded in Big Endian bytes,
+/// in the form of a tuple (`key`, `value`).
+pub async fn parse_u32_key_record_async<T: AsyncDecodable>(
+    record: (IVec, IVec),
+) -> Result<(u32, T)> {
+    let key_bytes: [u8; 4] = record.0.as_ref().try_into().unwrap();
+    let key = u32::from_be_bytes(key_bytes);
+    let value = deserialize_async(&record.1).await?;
+
+    Ok((key, value))
+}
+
+/// Parse a sled record with a u64 key, encoded in Big Endian bytes,
+/// in the form of a tuple (`key`, `value`).
+pub async fn parse_u64_key_record_async<T: AsyncDecodable>(
+    record: (IVec, IVec),
+) -> Result<(u64, T)> {
+    let key_bytes: [u8; 8] = record.0.as_ref().try_into().unwrap();
+    let key = u64::from_be_bytes(key_bytes);
+    let value = deserialize_async(&record.1).await?;
+
+    Ok((key, value))
 }

@@ -18,14 +18,17 @@
 
 //! Simulate the creation of a [`SledTreeOverlay`] on top of a
 //! [`sled::Tree`] instance, and perform async serializations and
-//! deserializations of its diffs to verify correctness.
+//! deserializations of its diffs  and records to verify correctness.
 
 #![cfg(feature = "async-serial")]
 
 use darkfi_serial::{deserialize_async, serialize_async};
 use sled::Config;
 
-use sled_overlay::SledTreeOverlay;
+use sled_overlay::{
+    async_serial::{parse_record_async, parse_u32_key_record_async, parse_u64_key_record_async},
+    SledTreeOverlay,
+};
 
 #[test]
 fn sled_tree_diff_async_serialization() -> Result<(), sled::Error> {
@@ -62,6 +65,53 @@ fn sled_tree_diff_async_serialization() -> Result<(), sled::Error> {
             let deserialized = deserialize_async(&serialized).await?;
             assert_eq!(diff, deserialized);
         }
+
+        Ok(())
+    })
+}
+
+#[test]
+fn sled_tree_record_deserialization_async() -> Result<(), sled::Error> {
+    smol::block_on(async {
+        // Initialize database
+        let config = Config::new().temporary(true);
+        let db = config.open()?;
+
+        // Create some dummy records
+        let record0 = ("key_0", "val_0");
+        let record1 = (1_u32, 1_u32);
+        let record2 = (2_u64, 2_u64);
+
+        // Initialize tree with the dummy records
+        let tree = db.open_tree(b"_tree")?;
+        tree.insert(
+            serialize_async(&record0.0).await,
+            serialize_async(&record0.1).await,
+        )?;
+        tree.insert(record1.0.to_be_bytes(), serialize_async(&record1.1).await)?;
+        tree.insert(record2.0.to_be_bytes(), serialize_async(&record2.1).await)?;
+
+        // Grab each record and verify deserialization
+        let key = serialize_async(&record0.0).await;
+        let serialized_value = tree.get(&key)?.unwrap();
+        let deserialized_record: (String, String) =
+            parse_record_async((key.into(), serialized_value)).await?;
+        assert_eq!(record0.0, deserialized_record.0);
+        assert_eq!(record0.1, deserialized_record.1);
+
+        let key = record1.0.to_be_bytes();
+        let serialized_value = tree.get(key)?.unwrap();
+        let deserialized_record: (u32, u32) =
+            parse_u32_key_record_async(((&key).into(), serialized_value)).await?;
+        assert_eq!(record1.0, deserialized_record.0);
+        assert_eq!(record1.1, deserialized_record.1);
+
+        let key = record2.0.to_be_bytes();
+        let serialized_value = tree.get(key)?.unwrap();
+        let deserialized_record: (u64, u64) =
+            parse_u64_key_record_async(((&key).into(), serialized_value)).await?;
+        assert_eq!(record2.0, deserialized_record.0);
+        assert_eq!(record2.1, deserialized_record.1);
 
         Ok(())
     })

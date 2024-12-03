@@ -18,14 +18,17 @@
 
 //! Simulate the creation of a [`SledDbOverlay`] on top of an entire
 //! [`sled::Db`] instance, and perform perform async serializations and
-//! deserializations of its diffs to verify correctness.
+//! deserializations of its diffs and records to verify correctness.
 
 #![cfg(feature = "serial")]
 
 use darkfi_serial::{deserialize, serialize};
 use sled::Config;
 
-use sled_overlay::SledDbOverlay;
+use sled_overlay::{
+    serial::{parse_record, parse_u32_key_record, parse_u64_key_record},
+    SledDbOverlay,
+};
 
 const TREE_1: &[u8] = b"_tree1";
 const TREE_2: &[u8] = b"_tree2";
@@ -90,6 +93,52 @@ fn sled_db_diff_serialization() -> Result<(), sled::Error> {
         let deserialized = deserialize(&serialized)?;
         assert_eq!(diff, deserialized);
     }
+
+    Ok(())
+}
+
+#[test]
+fn sled_db_record_deserialization() -> Result<(), sled::Error> {
+    // Initialize database
+    let config = Config::new().temporary(true);
+    let db = config.open()?;
+
+    // Initialize overlay
+    let mut overlay = SledDbOverlay::new(&db, vec![]);
+
+    // Open trees in the overlay
+    overlay.open_tree(TREE_1, false)?;
+    overlay.open_tree(TREE_2, false)?;
+    overlay.open_tree(TREE_3, false)?;
+
+    // Create some dummy records
+    let record0 = ("key_0", "val_0");
+    let record1 = (1_u32, 1_u32);
+    let record2 = (2_u64, 2_u64);
+
+    // Insert records to the trees
+    overlay.insert(TREE_1, &serialize(&record0.0), &serialize(&record0.1))?;
+    overlay.insert(TREE_2, &record1.0.to_be_bytes(), &serialize(&record1.1))?;
+    overlay.insert(TREE_3, &record2.0.to_be_bytes(), &serialize(&record2.1))?;
+
+    // Grab each record and verify deserialization
+    let key = serialize(&record0.0);
+    let serialized_value = overlay.get(TREE_1, &key)?.unwrap();
+    let deserialized_record: (String, String) = parse_record((key.into(), serialized_value))?;
+    assert_eq!(record0.0, deserialized_record.0);
+    assert_eq!(record0.1, deserialized_record.1);
+
+    let key = record1.0.to_be_bytes();
+    let serialized_value = overlay.get(TREE_2, &key)?.unwrap();
+    let deserialized_record: (u32, u32) = parse_u32_key_record(((&key).into(), serialized_value))?;
+    assert_eq!(record1.0, deserialized_record.0);
+    assert_eq!(record1.1, deserialized_record.1);
+
+    let key = record2.0.to_be_bytes();
+    let serialized_value = overlay.get(TREE_3, &key)?.unwrap();
+    let deserialized_record: (u64, u64) = parse_u64_key_record(((&key).into(), serialized_value))?;
+    assert_eq!(record2.0, deserialized_record.0);
+    assert_eq!(record2.1, deserialized_record.1);
 
     Ok(())
 }
