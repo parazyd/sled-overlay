@@ -26,7 +26,9 @@
 pub use sled;
 
 pub mod tree;
-pub use tree::{SledTreeOverlay, SledTreeOverlayState, SledTreeOverlayStateDiff};
+pub use tree::{
+    SledTreeOverlay, SledTreeOverlayIter, SledTreeOverlayState, SledTreeOverlayStateDiff,
+};
 
 pub mod database;
 pub use database::{SledDbOverlay, SledDbOverlayStateDiff};

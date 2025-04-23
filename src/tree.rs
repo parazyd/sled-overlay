@@ -16,9 +16,13 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    cmp::Ordering,
+    collections::{btree_map::Keys, BTreeMap, BTreeSet},
+    iter::{FusedIterator, Peekable},
+};
 
-use sled::IVec;
+use sled::{IVec, Iter};
 
 /// Struct representing [`SledTreeOverlay`] cache state.
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -506,5 +510,123 @@ impl SledTreeOverlay {
     /// Remove provided tree overlay state changes from our own.
     pub fn remove_diff(&mut self, diff: &SledTreeOverlayStateDiff) {
         self.state.remove_diff(diff)
+    }
+
+    /// Immutably iterate through the tree overlay.
+    pub fn iter(&self) -> SledTreeOverlayIter<'_> {
+        SledTreeOverlayIter::new(self)
+    }
+}
+
+/// Immutable iterator of a [`SledTreeOverlay`].
+pub struct SledTreeOverlayIter<'a> {
+    // Reference to the tree overlay.
+    overlay: &'a SledTreeOverlay,
+    // Iterator over [`sled::Tree`] keys that is being overlayed.
+    tree_iter: Peekable<Iter>,
+    // Iterator over the overlay's chache keys.
+    cache_iter: Peekable<Keys<'a, IVec, IVec>>,
+}
+
+impl<'a> SledTreeOverlayIter<'a> {
+    fn new(overlay: &'a SledTreeOverlay) -> Self {
+        Self {
+            overlay,
+            tree_iter: overlay.tree.iter().peekable(),
+            cache_iter: overlay.state.cache.keys().peekable(),
+        }
+    }
+}
+
+impl Iterator for SledTreeOverlayIter<'_> {
+    type Item = Result<(IVec, IVec), sled::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // First we peek over the next tree key
+        let peek1 = self.tree_iter.peek();
+
+        // Check if a sled error occured
+        if let Some(Err(e)) = peek1 {
+            return Some(Err(e.clone()));
+        }
+
+        // Peek over the next cache key
+        let peek2 = self.cache_iter.peek();
+
+        // Find the next key we have to grab,
+        // and which iterator to advance.
+        let mut advance_iter: u8 = 0;
+        let next_key = match (peek1, peek2) {
+            (Some(k1), Some(&k2)) => {
+                // Its safe to unwrap here since we already checked for errors
+                let (k1, _) = k1.as_ref().unwrap();
+                match k1.cmp(k2) {
+                    Ordering::Equal => Some(k1.clone()),
+                    Ordering::Greater => {
+                        advance_iter = 2;
+                        Some(k2.clone())
+                    }
+                    Ordering::Less => {
+                        advance_iter = 1;
+                        Some(k1.clone())
+                    }
+                }
+            }
+            (Some(k1), None) => {
+                // Its safe to unwrap here since we already checked for errors
+                let (k1, _) = k1.as_ref().unwrap();
+                advance_iter = 1;
+                Some(k1.clone())
+            }
+            (None, Some(&k2)) => {
+                advance_iter = 2;
+                Some(k2.clone())
+            }
+            (None, None) => None,
+        };
+
+        // Check if we have a key to grab
+        let next_key = next_key?;
+
+        // Advance the corresponding iterator
+        match advance_iter {
+            1 => {
+                self.tree_iter.next();
+            }
+            2 => {
+                self.cache_iter.next();
+            }
+            _ => {
+                self.tree_iter.next();
+                self.cache_iter.next();
+            }
+        }
+
+        // Grab the next key value from the overlay
+        match self.overlay.get(&next_key) {
+            Ok(next_value) => match next_value {
+                Some(next_value) => Some(Ok((next_key, next_value))),
+                // If the value doesn't exist, it means it's in the
+                // removed set, so we advance the iterator.
+                None => self.next(),
+            },
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+impl FusedIterator for SledTreeOverlayIter<'_> {}
+
+/// Define fusion iteration behavior, allowing
+/// us to use the [`SledTreeOverlayIter`] iterator in
+/// loops directly, without using .iter() method
+/// of [`SledTreeOverlay`].
+impl<'a> IntoIterator for &'a SledTreeOverlay {
+    type Item = Result<(IVec, IVec), sled::Error>;
+
+    type IntoIter = SledTreeOverlayIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }

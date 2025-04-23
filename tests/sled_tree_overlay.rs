@@ -20,7 +20,7 @@
 //! [`sled::Tree`] instances, and perform writes to verify overlay's cache
 //! functionality.
 
-use sled::{transaction::ConflictableTransactionError, Config, Transactional};
+use sled::{transaction::ConflictableTransactionError, Config, IVec, Transactional};
 
 use sled_overlay::SledTreeOverlay;
 
@@ -160,6 +160,51 @@ fn sled_tree_overlay_last() -> Result<(), sled::Error> {
     let last = overlay.last()?.unwrap();
     assert_eq!(last.0, b"key_a");
     assert_eq!(last.1, b"val_a");
+
+    Ok(())
+}
+
+#[test]
+fn sled_tree_overlay_iteration() -> Result<(), sled::Error> {
+    // Initialize database
+    let config = Config::new().temporary(true);
+    let db = config.open()?;
+
+    // Initialize tree and its overlay
+    let tree = db.open_tree(TREE_1)?;
+    tree.insert(b"key_a", b"val_a")?;
+    tree.insert(b"key_c", b"val_c")?;
+    tree.insert(b"key_e", b"val_e")?;
+    let mut overlay = SledTreeOverlay::new(&tree);
+
+    // Insert some values to the overlay
+    overlay.insert(b"key_b", b"val_b")?;
+    overlay.insert(b"key_d", b"val_d")?;
+    overlay.insert(b"key_e", b"val_ee")?;
+    overlay.insert(b"key_f", b"val_f")?;
+
+    // Remove some values from the overlay
+    overlay.remove(b"key_c")?;
+    overlay.remove(b"key_d")?;
+
+    // Iterate overlay to verify sequence
+    let expected_sequence = vec![
+        (IVec::from(b"key_a"), IVec::from(b"val_a")),
+        (IVec::from(b"key_b"), IVec::from(b"val_b")),
+        (IVec::from(b"key_e"), IVec::from(b"val_ee")),
+        (IVec::from(b"key_f"), IVec::from(b"val_f")),
+    ];
+    for (index, record) in overlay.iter().enumerate() {
+        assert_eq!(record?, expected_sequence[index]);
+    }
+
+    // We can even iterate without calling .iter()
+    let mut index = 0;
+    #[allow(clippy::explicit_counter_loop)]
+    for record in &overlay {
+        assert_eq!(record?, expected_sequence[index]);
+        index += 1;
+    }
 
     Ok(())
 }

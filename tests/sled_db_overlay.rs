@@ -20,7 +20,7 @@
 //! [`sled::Db`] instance, and perform writes to verify overlay's cache
 //! functionality.
 
-use sled::Config;
+use sled::{Config, IVec};
 
 use sled_overlay::SledDbOverlay;
 
@@ -107,6 +107,48 @@ fn sled_db_overlay() -> Result<(), sled::Error> {
     assert_eq!(tree_2.get(b"key_d")?, Some(b"val_d".into()));
     assert_eq!(tree_2.get(b"key_e")?, Some(b"val_e".into()));
     assert_eq!(tree_2.get(b"key_f")?, Some(b"val_f".into()));
+
+    Ok(())
+}
+
+#[test]
+fn sled_db_overlay_iteration() -> Result<(), sled::Error> {
+    // Initialize database
+    let config = Config::new().temporary(true);
+    let db = config.open()?;
+
+    // Initialize tree
+    let tree = db.open_tree(TREE_1)?;
+    tree.insert(b"key_a", b"val_a")?;
+    tree.insert(b"key_c", b"val_c")?;
+    tree.insert(b"key_e", b"val_e")?;
+
+    // Initialize overlay
+    let mut overlay = SledDbOverlay::new(&db, vec![]);
+
+    // Open tree in the overlay
+    overlay.open_tree(TREE_1, false)?;
+
+    // Insert some values to the overlay
+    overlay.insert(TREE_1, b"key_b", b"val_b")?;
+    overlay.insert(TREE_1, b"key_d", b"val_d")?;
+    overlay.insert(TREE_1, b"key_e", b"val_ee")?;
+    overlay.insert(TREE_1, b"key_f", b"val_f")?;
+
+    // Remove some values from the overlay
+    overlay.remove(TREE_1, b"key_c")?;
+    overlay.remove(TREE_1, b"key_d")?;
+
+    // Iterate overlay to verify sequence
+    let expected_sequence = vec![
+        (IVec::from(b"key_a"), IVec::from(b"val_a")),
+        (IVec::from(b"key_b"), IVec::from(b"val_b")),
+        (IVec::from(b"key_e"), IVec::from(b"val_ee")),
+        (IVec::from(b"key_f"), IVec::from(b"val_f")),
+    ];
+    for (index, record) in overlay.iter(TREE_1)?.enumerate() {
+        assert_eq!(record?, expected_sequence[index]);
+    }
 
     Ok(())
 }

@@ -23,7 +23,7 @@ use sled::{
     IVec, Transactional,
 };
 
-use crate::{SledTreeOverlay, SledTreeOverlayStateDiff};
+use crate::{SledTreeOverlay, SledTreeOverlayIter, SledTreeOverlayStateDiff};
 
 /// Struct representing [`SledDbOverlay`] cache state
 #[derive(Debug, Clone)]
@@ -818,5 +818,11 @@ impl SledDbOverlay {
         self.remove_diff(diff);
 
         Ok(())
+    }
+
+    /// Retrieve an immutable itterator from the overlay if the specified tree cache exists.
+    pub fn iter(&self, tree_key: &[u8]) -> Result<SledTreeOverlayIter<'_>, sled::Error> {
+        let cache = self.get_cache(&tree_key.into())?;
+        Ok(cache.iter())
     }
 }
