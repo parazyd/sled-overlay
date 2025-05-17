@@ -382,11 +382,13 @@ impl SledDbOverlayStateDiff {
             if !self.initial_tree_names.contains(key) {
                 self.initial_tree_names.push(key.clone());
             }
-            // If the key is not in the cache, it must
-            // be in the dropped trees, so we update its
-            // values.
+
+            // If the key is not in the cache, and it exists
+            // in the dropped trees, update its diff
             let Some(tree_overlay) = self.caches.get_mut(key) else {
-                let (tree_overlay, _) = self.dropped_trees.get_mut(key).unwrap();
+                let Some((tree_overlay, _)) = self.dropped_trees.get_mut(key) else {
+                    continue;
+                };
                 tree_overlay.update_values(&cache_pair.0);
                 continue;
             };
