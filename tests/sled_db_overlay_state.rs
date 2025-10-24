@@ -51,6 +51,7 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
     overlay.open_tree(TREE_1, false)?;
     overlay.open_tree(TREE_3, false)?;
     overlay.open_tree(TREE_4, false)?;
+    overlay.open_tree(TREE_6, false)?;
 
     // Make a vector to keep track of changes
     let mut sequence = vec![];
@@ -86,8 +87,8 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
     assert_eq!(overlay.state.initial_tree_names.len(), 3);
     assert!(overlay.state.initial_tree_names.contains(&TREE_1.into()));
     assert!(overlay.state.initial_tree_names.contains(&TREE_4.into()));
-    assert_eq!(overlay.state.new_tree_names, [TREE_2, TREE_5]);
-    assert_eq!(overlay.state.caches.len(), 3);
+    assert_eq!(overlay.state.new_tree_names, [TREE_6, TREE_2, TREE_5]);
+    assert_eq!(overlay.state.caches.len(), 4);
     let tree_1_cache = overlay.state.caches.get(TREE_1).unwrap();
     assert_eq!(tree_1_cache.state.cache.len(), 2);
     assert_eq!(
@@ -106,6 +107,9 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
             .get::<sled::IVec>(&b"key_b".into()),
         Some(&b"key_b".into())
     );
+    let tree_6_cache = overlay.state.caches.get(TREE_6).unwrap();
+    assert!(tree_6_cache.state.cache.is_empty());
+    assert!(tree_6_cache.state.removed.is_empty());
     let tree_2_cache = overlay.state.caches.get(TREE_2).unwrap();
     assert_eq!(tree_2_cache.state.cache.len(), 2);
     assert_eq!(
@@ -157,7 +161,7 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
     assert_eq!(sequence[0].initial_tree_names.len(), 3);
     assert!(sequence[0].initial_tree_names.contains(&TREE_1.into()));
     assert!(sequence[0].initial_tree_names.contains(&TREE_4.into()));
-    assert_eq!(sequence[0].caches.len(), 3);
+    assert_eq!(sequence[0].caches.len(), 4);
     let (tree_1_cache, drop) = sequence[0].caches.get(TREE_1).unwrap();
     assert_eq!(tree_1_cache.cache.len(), 1);
     assert_eq!(
@@ -186,12 +190,17 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
         Some(&b"val_g".into())
     );
     assert!(!drop);
+    let (tree_6_cache, drop) = sequence[0].caches.get(TREE_6).unwrap();
+    assert!(tree_6_cache.cache.is_empty());
+    assert!(tree_6_cache.removed.is_empty());
+    assert!(!drop);
     assert!(sequence[0].dropped_trees.is_empty());
     assert_eq!(sequence[0], sequence[0].inverse().inverse());
 
-    assert_eq!(sequence[1].initial_tree_names.len(), 4);
+    assert_eq!(sequence[1].initial_tree_names.len(), 5);
     assert!(sequence[1].initial_tree_names.contains(&TREE_1.into()));
     assert!(sequence[1].initial_tree_names.contains(&TREE_4.into()));
+    assert!(sequence[1].initial_tree_names.contains(&TREE_6.into()));
     assert!(sequence[1].initial_tree_names.contains(&TREE_3.into()));
     assert_eq!(sequence[1].caches.len(), 4);
     let (tree_1_cache, drop) = sequence[1].caches.get(TREE_1).unwrap();
@@ -247,9 +256,10 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
     assert!(!restored);
     assert_eq!(sequence[1], sequence[1].inverse().inverse());
 
-    assert_eq!(sequence[2].initial_tree_names.len(), 5);
+    assert_eq!(sequence[2].initial_tree_names.len(), 6);
     assert!(sequence[2].initial_tree_names.contains(&TREE_1.into()));
     assert!(sequence[2].initial_tree_names.contains(&TREE_4.into()));
+    assert!(sequence[2].initial_tree_names.contains(&TREE_6.into()));
     assert!(sequence[2].initial_tree_names.contains(&TREE_2.into()));
     assert!(sequence[2].initial_tree_names.contains(&TREE_5.into()));
     assert_eq!(sequence[2].caches.len(), 2);
@@ -308,12 +318,13 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
 
     // All trees should be present in sled
     let db_tree_names = db.tree_names();
-    assert_eq!(db_tree_names.len(), 6);
+    assert_eq!(db_tree_names.len(), 7);
     assert!(db_tree_names.contains(&TREE_1.into()));
     assert!(db_tree_names.contains(&TREE_2.into()));
     assert!(db_tree_names.contains(&TREE_3.into()));
     assert!(db_tree_names.contains(&TREE_4.into()));
     assert!(db_tree_names.contains(&TREE_5.into()));
+    assert!(db_tree_names.contains(&TREE_6.into()));
 
     let tree_1 = db.open_tree(TREE_1)?;
     assert_eq!(tree_1.len(), 2);
@@ -330,12 +341,16 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
     assert_eq!(tree_4.get(b"key_k")?, Some(b"val_k".into()));
     let tree_5 = db.open_tree(TREE_5)?;
     assert!(tree_5.is_empty());
+    let tree_6 = db.open_tree(TREE_6)?;
+    assert!(tree_6.is_empty());
 
-    assert_eq!(overlay.state.initial_tree_names.len(), 4);
+    assert_eq!(overlay.state.initial_tree_names.len(), 5);
     assert!(overlay.state.initial_tree_names.contains(&TREE_1.into()));
     assert!(overlay.state.initial_tree_names.contains(&TREE_4.into()));
     assert!(overlay.state.initial_tree_names.contains(&TREE_3.into()));
+    assert!(overlay.state.initial_tree_names.contains(&TREE_6.into()));
     assert_eq!(overlay.state.new_tree_names, [TREE_2, TREE_5]);
+    // Tree 6 was stale so it should have been closed
     assert_eq!(overlay.state.caches.len(), 3);
     let tree_1_cache = overlay.state.caches.get(TREE_1).unwrap();
     assert_eq!(tree_1_cache.state.cache.len(), 2);
@@ -411,11 +426,12 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
 
     // All trees should be present in sled
     let db_tree_names = db.tree_names();
-    assert_eq!(db_tree_names.len(), 5);
+    assert_eq!(db_tree_names.len(), 6);
     assert!(db_tree_names.contains(&TREE_1.into()));
     assert!(db_tree_names.contains(&TREE_2.into()));
     assert!(db_tree_names.contains(&TREE_4.into()));
     assert!(db_tree_names.contains(&TREE_5.into()));
+    assert!(db_tree_names.contains(&TREE_6.into()));
 
     let tree_1 = db.open_tree(TREE_1)?;
     assert_eq!(tree_1.len(), 1);
@@ -431,12 +447,15 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
     let tree_5 = db.open_tree(TREE_5)?;
     assert_eq!(tree_5.len(), 1);
     assert_eq!(tree_5.get(b"key_h")?, Some(b"val_h".into()));
+    let tree_6 = db.open_tree(TREE_6)?;
+    assert!(tree_6.is_empty());
 
-    assert_eq!(overlay.state.initial_tree_names.len(), 5);
+    assert_eq!(overlay.state.initial_tree_names.len(), 6);
     assert!(overlay.state.initial_tree_names.contains(&TREE_1.into()));
     assert!(overlay.state.initial_tree_names.contains(&TREE_4.into()));
     assert!(overlay.state.initial_tree_names.contains(&TREE_2.into()));
     assert!(overlay.state.initial_tree_names.contains(&TREE_5.into()));
+    assert!(overlay.state.initial_tree_names.contains(&TREE_6.into()));
     assert!(overlay.state.new_tree_names.is_empty());
     // Tree 5 was stale so it should have been closed
     assert_eq!(overlay.state.caches.len(), 2);
@@ -494,10 +513,11 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
 
     // All trees should be present in sled
     let db_tree_names = db.tree_names();
-    assert_eq!(db_tree_names.len(), 4);
+    assert_eq!(db_tree_names.len(), 5);
     assert!(db_tree_names.contains(&TREE_1.into()));
     assert!(db_tree_names.contains(&TREE_2.into()));
     assert!(db_tree_names.contains(&TREE_5.into()));
+    assert!(db_tree_names.contains(&TREE_6.into()));
 
     let tree_1 = db.open_tree(TREE_1)?;
     assert_eq!(tree_1.len(), 2);
@@ -510,13 +530,16 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
     let tree_5 = db.open_tree(TREE_5)?;
     assert_eq!(tree_5.len(), 1);
     assert_eq!(tree_5.get(b"key_h")?, Some(b"val_h".into()));
+    let tree_6 = db.open_tree(TREE_6)?;
+    assert!(tree_6.is_empty());
 
     // Since we removed everything, current overlay must not have
     // diffs over the tree, therefore its safe to keep using it
-    assert_eq!(overlay.state.initial_tree_names.len(), 4);
+    assert_eq!(overlay.state.initial_tree_names.len(), 5);
     assert!(overlay.state.initial_tree_names.contains(&TREE_1.into()));
     assert!(overlay.state.initial_tree_names.contains(&TREE_2.into()));
     assert!(overlay.state.initial_tree_names.contains(&TREE_5.into()));
+    assert!(overlay.state.initial_tree_names.contains(&TREE_6.into()));
     assert!(overlay.state.new_tree_names.is_empty());
     assert!(overlay.state.caches.is_empty());
     assert!(overlay.state.dropped_trees.is_empty());
@@ -541,9 +564,10 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
     assert_eq!(overlay.apply_diff(&diff), Ok(()));
     db.flush()?;
     let db_tree_names = db.tree_names();
-    assert_eq!(db_tree_names.len(), 3);
+    assert_eq!(db_tree_names.len(), 4);
     assert!(db_tree_names.contains(&TREE_1.into()));
     assert!(db_tree_names.contains(&TREE_2.into()));
+    assert!(db_tree_names.contains(&TREE_6.into()));
 
     let tree_1 = db.open_tree(TREE_1)?;
     assert_eq!(tree_1.len(), 2);
@@ -552,14 +576,17 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
     let tree_2 = db.open_tree(TREE_2)?;
     assert_eq!(tree_2.len(), 1);
     assert_eq!(tree_2.get(b"key_f")?, Some(b"val_ff".into()));
+    let tree_6 = db.open_tree(TREE_6)?;
+    assert!(tree_6.is_empty());
 
     // Now we grab the diff inverse, apply it and verity sled state
     assert_eq!(overlay.apply_diff(&diff.inverse()), Ok(()));
     db.flush()?;
     let db_tree_names = db.tree_names();
-    assert_eq!(db_tree_names.len(), 4);
+    assert_eq!(db_tree_names.len(), 5);
     assert!(db_tree_names.contains(&TREE_1.into()));
     assert!(db_tree_names.contains(&TREE_2.into()));
+    assert!(db_tree_names.contains(&TREE_6.into()));
     assert!(db_tree_names.contains(&TREE_5.into()));
 
     let tree_1 = db.open_tree(TREE_1)?;
@@ -570,6 +597,8 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
     assert_eq!(tree_2.len(), 2);
     assert_eq!(tree_2.get(b"key_d")?, Some(b"val_d".into()));
     assert_eq!(tree_2.get(b"key_f")?, Some(b"val_f".into()));
+    let tree_6 = db.open_tree(TREE_6)?;
+    assert!(tree_6.is_empty());
     let tree_5 = db.open_tree(TREE_5)?;
     assert_eq!(tree_5.len(), 1);
     assert_eq!(tree_5.get(b"key_h")?, Some(b"val_h".into()));
@@ -580,9 +609,10 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
     db.flush()?;
 
     let db_tree_names = db.tree_names();
-    assert_eq!(db_tree_names.len(), 5);
+    assert_eq!(db_tree_names.len(), 6);
     assert!(db_tree_names.contains(&TREE_1.into()));
     assert!(db_tree_names.contains(&TREE_2.into()));
+    assert!(db_tree_names.contains(&TREE_6.into()));
     assert!(db_tree_names.contains(&TREE_4.into()));
     assert!(db_tree_names.contains(&TREE_5.into()));
 
@@ -593,6 +623,8 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
     assert_eq!(tree_2.len(), 2);
     assert_eq!(tree_2.get(b"key_d")?, Some(b"val_d".into()));
     assert_eq!(tree_2.get(b"key_e")?, Some(b"val_e".into()));
+    let tree_6 = db.open_tree(TREE_6)?;
+    assert!(tree_6.is_empty());
     let tree_4 = db.open_tree(TREE_4)?;
     assert_eq!(tree_4.len(), 2);
     assert_eq!(tree_4.get(b"key_j")?, Some(b"val_j".into()));
@@ -605,8 +637,9 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
     db.flush()?;
 
     let db_tree_names = db.tree_names();
-    assert_eq!(db_tree_names.len(), 4);
+    assert_eq!(db_tree_names.len(), 5);
     assert!(db_tree_names.contains(&TREE_1.into()));
+    assert!(db_tree_names.contains(&TREE_6.into()));
     assert!(db_tree_names.contains(&TREE_3.into()));
     assert!(db_tree_names.contains(&TREE_4.into()));
 
@@ -614,6 +647,8 @@ fn sled_db_overlay_state() -> Result<(), sled::Error> {
     assert_eq!(tree_1.len(), 2);
     assert_eq!(tree_1.get(b"key_a")?, Some(b"val_a".into()));
     assert_eq!(tree_1.get(b"key_b")?, Some(b"val_b".into()));
+    let tree_6 = db.open_tree(TREE_6)?;
+    assert!(tree_6.is_empty());
     let tree_3 = db.open_tree(TREE_3)?;
     assert_eq!(tree_3.len(), 1);
     assert_eq!(tree_3.get(b"key_i")?, Some(b"val_i".into()));

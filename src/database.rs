@@ -275,8 +275,11 @@ impl SledDbOverlayStateDiff {
         for (key, cache) in state.caches.iter() {
             let mut diff = cache.diff(&[])?;
 
-            // Skip if diff is empty
-            if diff.cache.is_empty() && diff.removed.is_empty() {
+            // Skip if diff is empty for an existing tree
+            if diff.cache.is_empty()
+                && diff.removed.is_empty()
+                && !state.new_tree_names.contains(key)
+            {
                 continue;
             }
 
@@ -351,9 +354,19 @@ impl SledDbOverlayStateDiff {
             ..Default::default()
         };
 
-        for (key, (cache, _)) in self.caches.iter() {
+        for (key, (cache, drop)) in self.caches.iter() {
             let inverse = cache.inverse();
-            let drop = inverse.cache.is_empty() && !self.initial_tree_names.contains(key);
+            // Flip its drop flag if its a new empty tree, otherwise
+            // check if its cache is empty and its a new tree.
+            let drop = if inverse.cache.is_empty()
+                && inverse.removed.is_empty()
+                && !self.initial_tree_names.contains(key)
+            {
+                !drop
+            } else {
+                inverse.cache.is_empty() && !self.initial_tree_names.contains(key)
+            };
+            //let drop = inverse.cache.is_empty() && !self.initial_tree_names.contains(key);
             diff.caches.insert(key.clone(), (inverse, drop));
         }
 

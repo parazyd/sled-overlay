@@ -188,7 +188,7 @@ fn sled_tree_overlay_iteration() -> Result<(), sled::Error> {
     overlay.remove(b"key_d")?;
 
     // Iterate overlay to verify sequence
-    let expected_sequence = vec![
+    let expected_sequence = [
         (IVec::from(b"key_a"), IVec::from(b"val_a")),
         (IVec::from(b"key_b"), IVec::from(b"val_b")),
         (IVec::from(b"key_e"), IVec::from(b"val_ee")),
