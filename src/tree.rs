@@ -471,13 +471,13 @@ impl SledTreeOverlay {
     pub fn clear(&mut self) -> Result<(), sled::Error> {
         // Clear state
         self.state.cache = BTreeMap::new();
-        self.state.removed = BTreeSet::new();
 
-        // Iterate over the tree to mark its keys as removed
-        for record in self.tree.iter() {
-            let (key, _) = record?;
-            self.state.removed.insert(key);
-        }
+        // Mark all the db's keys as removed
+        self.state.removed = self
+            .tree
+            .iter()
+            .keys()
+            .collect::<Result<BTreeSet<IVec>, sled::Error>>()?;
 
         Ok(())
     }
