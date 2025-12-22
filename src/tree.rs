@@ -466,6 +466,22 @@ impl SledTreeOverlay {
         Ok(prev)
     }
 
+    /// Removes all values from the cache and marks all tree records as
+    /// removed.
+    pub fn clear(&mut self) -> Result<(), sled::Error> {
+        // Clear state
+        self.state.cache = BTreeMap::new();
+        self.state.removed = BTreeSet::new();
+
+        // Iterate over the tree to mark its keys as removed
+        for record in self.tree.iter() {
+            let (key, _) = record?;
+            self.state.removed.insert(key);
+        }
+
+        Ok(())
+    }
+
     /// Aggregate all the current overlay changes into a [`sled::Batch`] ready for
     /// further operation. If there are no changes, return `None`.
     pub fn aggregate(&self) -> Option<sled::Batch> {

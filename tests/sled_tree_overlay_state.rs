@@ -374,3 +374,158 @@ fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
 
     Ok(())
 }
+
+#[test]
+fn sled_tree_overlay_clear_state() -> Result<(), sled::Error> {
+    // Initialize database
+    let config = Config::new().temporary(true);
+    let db = config.open()?;
+
+    // Initialize tree with some values and its overlay
+    let tree = db.open_tree(TREE)?;
+    tree.insert(b"key_a", b"val_a")?;
+    let mut overlay = SledTreeOverlay::new(&tree);
+    assert!(!overlay.is_empty());
+
+    // Make a vector to keep track of changes
+    let mut sequence = vec![];
+
+    // Perform some changes and grab their differences
+    overlay.insert(b"key_b", b"val_b")?;
+    sequence.push(overlay.diff(&sequence)?);
+
+    overlay.clear()?;
+    sequence.push(overlay.diff(&sequence)?);
+
+    overlay.insert(b"key_a", b"val_a")?;
+    assert!(overlay.remove(b"key_b").is_err());
+    overlay.insert(b"key_c", b"val_c")?;
+    sequence.push(overlay.diff(&sequence)?);
+
+    // Verify overlay has the correct state
+    assert_eq!(overlay.state.cache.len(), 2);
+    assert_eq!(
+        overlay.state.cache.get::<sled::IVec>(&b"key_a".into()),
+        Some(&b"val_a".into())
+    );
+    assert_eq!(
+        overlay.state.cache.get::<sled::IVec>(&b"key_c".into()),
+        Some(&b"val_c".into())
+    );
+    assert!(overlay.state.removed.is_empty());
+
+    // Verify diffs sequence is correct
+    assert_eq!(sequence.len(), 3);
+
+    assert_eq!(sequence[0].cache.len(), 1);
+    assert_eq!(
+        sequence[0].cache.get::<sled::IVec>(&b"key_b".into()),
+        Some(&(None, b"val_b".into()))
+    );
+    assert!(sequence[0].removed.is_empty());
+    assert_eq!(sequence[0], sequence[0].inverse().inverse());
+
+    assert!(sequence[1].cache.is_empty());
+    assert_eq!(sequence[1].removed.len(), 2);
+    assert_eq!(
+        sequence[1].removed.get::<sled::IVec>(&b"key_a".into()),
+        Some(&b"val_a".into())
+    );
+    assert_eq!(
+        sequence[1].removed.get::<sled::IVec>(&b"key_b".into()),
+        Some(&b"val_b".into())
+    );
+    assert_eq!(sequence[1], sequence[1].inverse().inverse());
+
+    assert_eq!(sequence[2].cache.len(), 2);
+    assert_eq!(
+        sequence[2].cache.get::<sled::IVec>(&b"key_a".into()),
+        Some(&(None, b"val_a".into()))
+    );
+    assert_eq!(
+        sequence[2].cache.get::<sled::IVec>(&b"key_c".into()),
+        Some(&(None, b"val_c".into()))
+    );
+    assert!(sequence[2].removed.is_empty());
+    assert_eq!(sequence[2], sequence[2].inverse().inverse());
+
+    // Now we are going to apply each diff and check that sled
+    // has been mutated accordingly
+    let batch = sequence[0].aggregate().unwrap();
+    tree.apply_batch(batch)?;
+    db.flush()?;
+    assert_eq!(tree.len(), 2);
+    assert_eq!(tree.get(b"key_a")?, Some(b"val_a".into()));
+    assert_eq!(tree.get(b"key_b")?, Some(b"val_b".into()));
+    overlay.remove_diff(&sequence[0]);
+
+    let batch = sequence[1].aggregate().unwrap();
+    tree.apply_batch(batch)?;
+    db.flush()?;
+    assert!(tree.is_empty());
+    overlay.remove_diff(&sequence[1]);
+
+    // Since we removed the diffs, current overlay diff must be
+    // the same as the last diff in the sequence
+    let diff = overlay.diff(&[])?;
+    assert_eq!(diff, sequence[2]);
+    // Therefore we can safely use its batch
+    let batch = overlay.aggregate().unwrap();
+    tree.apply_batch(batch)?;
+    db.flush()?;
+    assert_eq!(tree.len(), 2);
+    assert_eq!(tree.get(b"key_a")?, Some(b"val_a".into()));
+    assert_eq!(tree.get(b"key_b")?, None);
+    assert_eq!(tree.get(b"key_c")?, Some(b"val_c".into()));
+    overlay.remove_diff(&sequence[2]);
+
+    // Since we removed everything, current overlay must not have
+    // diffs over the tree, therefore its safe to keep using it
+    let diff = overlay.diff(&[])?;
+    assert!(diff.cache.is_empty());
+    assert!(diff.removed.is_empty());
+
+    // We are going to make some changes that we want to revert
+    // using the corresponding diff
+    overlay.clear()?;
+
+    // Grab the diff, apply it and verify tree state
+    let diff = overlay.diff(&[])?;
+    let batch = diff.aggregate().unwrap();
+    tree.apply_batch(batch)?;
+    db.flush()?;
+    assert!(tree.is_empty());
+
+    // Now we grab the diff revert batch, apply it and verity tree state
+    let batch = diff.revert().unwrap();
+    tree.apply_batch(batch)?;
+    db.flush()?;
+    assert_eq!(tree.len(), 2);
+    assert_eq!(tree.get(b"key_a")?, Some(b"val_a".into()));
+    assert_eq!(tree.get(b"key_b")?, None);
+    assert_eq!(tree.get(b"key_c")?, Some(b"val_c".into()));
+
+    // Now we are going to revert the diffs sequence going backwards
+    // and verify tree state mutates accordingly
+    let batch = sequence[2].revert().unwrap();
+    tree.apply_batch(batch)?;
+    db.flush()?;
+    assert!(tree.is_empty());
+
+    let batch = sequence[1].revert().unwrap();
+    tree.apply_batch(batch)?;
+    db.flush()?;
+    assert_eq!(tree.len(), 2);
+    assert_eq!(tree.get(b"key_a")?, Some(b"val_a".into()));
+    assert_eq!(tree.get(b"key_b")?, Some(b"val_b".into()));
+
+    let batch = sequence[0].revert().unwrap();
+    tree.apply_batch(batch)?;
+    db.flush()?;
+
+    // Tree has now reverted to its original state
+    assert_eq!(tree.len(), 1);
+    assert_eq!(tree.get(b"key_a")?, Some(b"val_a".into()));
+
+    Ok(())
+}
