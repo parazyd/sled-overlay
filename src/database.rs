@@ -640,6 +640,13 @@ impl SledDbOverlay {
         cache.remove(key)
     }
 
+    /// Removes all values from the specified tree cache and marks all
+    /// its tree records as removed.
+    pub fn clear(&mut self, tree_key: &[u8]) -> Result<(), sled::Error> {
+        let cache = self.get_cache_mut(&tree_key.into())?;
+        cache.clear()
+    }
+
     /// Aggregate all the current overlay changes into [`sled::Batch`] instances and
     /// return vectors of [`sled::Tree`] and their respective [`sled::Batch`] that can
     /// be used for further operations. If there are no changes, both vectors will be empty.
