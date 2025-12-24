@@ -145,11 +145,15 @@ impl SledTreeOverlayStateDiff {
             cache.insert(key.into(), (previous, value.into()));
         }
 
-        // Set removed keys, if they exist
+        // Set removed keys
         for key in state.removed.iter() {
-            if let Some(previous) = tree.get(key)? {
-                removed.insert(key.into(), previous);
+            // Grab each key last value, if it existed, otherwise
+            // use an empty value as its previous.
+            let previous = match tree.get(key)? {
+                Some(previous) => previous,
+                None => vec![].into(),
             };
+            removed.insert(key.into(), previous);
         }
 
         Ok(Self { cache, removed })
