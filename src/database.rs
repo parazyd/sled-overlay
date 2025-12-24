@@ -366,7 +366,6 @@ impl SledDbOverlayStateDiff {
             } else {
                 inverse.cache.is_empty() && !self.initial_tree_names.contains(key)
             };
-            //let drop = inverse.cache.is_empty() && !self.initial_tree_names.contains(key);
             diff.caches.insert(key.clone(), (inverse, drop));
         }
 
@@ -397,7 +396,7 @@ impl SledDbOverlayStateDiff {
             }
 
             // If the key is not in the cache, and it exists
-            // in the dropped trees, update its diff
+            // in the dropped trees, update its diff.
             let Some(tree_overlay) = self.caches.get_mut(key) else {
                 let Some((tree_overlay, _)) = self.dropped_trees.get_mut(key) else {
                     continue;
@@ -420,7 +419,13 @@ impl SledDbOverlayStateDiff {
         // Now we handle the dropped trees. We must have all
         // the keys in our dropped trees keys.
         for (key, (cache, restored)) in other.dropped_trees.iter() {
-            assert!(!self.caches.contains_key(key));
+            // Check if the tree was reopened
+            if let Some(tree_overlay) = self.caches.get_mut(key) {
+                assert!(!self.dropped_trees.contains_key(key));
+                // Remove the diff from our tree overlay state
+                tree_overlay.0.remove_diff(cache);
+                continue;
+            }
             assert!(self.dropped_trees.contains_key(key));
 
             // Restore tree if its flag is set to true
@@ -475,21 +480,22 @@ impl SledDbOverlay {
     pub fn open_tree(&mut self, tree_name: &[u8], protected: bool) -> Result<(), sled::Error> {
         let tree_key: IVec = tree_name.into();
 
-        // We don't allow reopening a dropped tree.
-        if self.state.dropped_trees.contains_key(&tree_key) {
-            return Err(sled::Error::CollectionNotFound(tree_key));
-        }
-
+        // Check if we have already opened this tree
         if self.state.caches.contains_key(&tree_key) {
-            // We have already opened this tree.
             return Ok(());
         }
 
-        // Open this tree in sled. In case it hasn't existed before, we also need
-        // to track it in `self.new_tree_names`.
+        // Open this tree in sled
         let tree = self.db.open_tree(&tree_key)?;
-        let cache = SledTreeOverlay::new(&tree);
+        let mut cache = SledTreeOverlay::new(&tree);
 
+        // If we are reopenning a dropped tree, grab its cache
+        if let Some(diff) = self.state.dropped_trees.remove(&tree_key) {
+            cache.state = (&diff).into();
+        }
+
+        // In case it hasn't existed before, we also need to track it
+        // in `self.new_tree_names`.
         if !self.state.initial_tree_names.contains(&tree_key) {
             self.state.new_tree_names.push(tree_key.clone());
         }
