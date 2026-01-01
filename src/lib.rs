@@ -32,12 +32,3 @@ pub use tree::{
 
 pub mod database;
 pub use database::{SledDbOverlay, SledDbOverlayStateDiff};
-
-#[cfg(feature = "async-serial")]
-pub mod async_serial;
-
-#[cfg(feature = "serial")]
-pub mod serial;
-
-#[cfg(feature = "serial")]
-pub use darkfi_serial;
