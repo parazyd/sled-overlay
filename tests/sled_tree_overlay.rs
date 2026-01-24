@@ -161,6 +161,21 @@ fn sled_tree_overlay_last() -> Result<(), sled::Error> {
     assert_eq!(last.0, b"key_a");
     assert_eq!(last.1, b"val_a");
 
+    // Reset the state
+    tree.remove(b"key_b")?;
+    tree.insert(b"key_a", b"val_a")?;
+    tree.insert(b"key_c", b"val_c")?;
+    tree.insert(b"key_d", b"val_d")?;
+
+    let mut overlay = SledTreeOverlay::new(&tree);
+    overlay.insert(b"key_b", b"val_b")?;
+    overlay.remove(b"key_d")?;
+
+    // Check last is the correct one
+    let last = overlay.last()?.unwrap();
+    assert_eq!(last.0, b"key_c");
+    assert_eq!(last.1, b"val_c");
+
     Ok(())
 }
 

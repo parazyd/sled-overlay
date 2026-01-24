@@ -398,11 +398,26 @@ impl SledTreeOverlay {
         // empty on the previous step.
         let cache_last = self.state.cache.last_key_value().unwrap();
 
-        // If the main tree has a last record, compare it with the cache
-        // last record, and return it if it's not removed
+        // Find the main tree last existing record, compare it with the
+        // cache last record, and return it if it's not removed
         if let Some(tree_last) = tree_last {
             if cache_last.0 < &tree_last.0 && !self.state.removed.contains(&tree_last.0) {
                 return Ok(Some((tree_last.0.clone(), tree_last.1.clone())));
+            }
+
+            let mut key = tree_last.0.clone();
+            while let Some(record) = self.tree.get_lt(key)? {
+                // Break if we reach the cache key position
+                if cache_last.0 >= &record.0 {
+                    break;
+                }
+
+                // Check if record is removed
+                if !self.state.removed.contains(&record.0) {
+                    return Ok(Some((record.0.clone(), record.1.clone())));
+                }
+
+                key = record.0;
             }
         }
 
