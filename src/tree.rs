@@ -477,15 +477,16 @@ impl SledTreeOverlay {
     /// Removes all values from the cache and marks all tree records as
     /// removed.
     pub fn clear(&mut self) -> Result<(), sled::Error> {
-        // Clear state
-        self.state.cache = BTreeMap::new();
-
-        // Mark all the db's keys as removed
-        self.state.removed = self
+        // Retrieve all db's keys to mark them as removed
+        let removed_keys = self
             .tree
             .iter()
             .keys()
             .collect::<Result<BTreeSet<IVec>, sled::Error>>()?;
+
+        // Clear state
+        self.state.cache = BTreeMap::new();
+        self.state.removed = removed_keys;
 
         Ok(())
     }
