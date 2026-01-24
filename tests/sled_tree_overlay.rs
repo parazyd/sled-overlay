@@ -40,8 +40,8 @@ fn sled_tree_overlay() -> Result<(), sled::Error> {
     let mut overlay_2 = SledTreeOverlay::new(&tree_2);
 
     // Check overlays are empty
-    assert!(overlay_1.is_empty());
-    assert!(overlay_2.is_empty());
+    assert!(overlay_1.is_empty()?);
+    assert!(overlay_2.is_empty()?);
 
     // Check last value is `None`
     assert_eq!(overlay_1.last()?, None);
@@ -66,8 +66,8 @@ fn sled_tree_overlay() -> Result<(), sled::Error> {
     assert_eq!(overlay_2.get(b"key_f")?, Some(b"val_f".into()));
 
     // Check overlays are not empty
-    assert!(!overlay_1.is_empty());
-    assert!(!overlay_2.is_empty());
+    assert!(!overlay_1.is_empty()?);
+    assert!(!overlay_2.is_empty()?);
 
     // Check their last values
     assert_eq!(overlay_1.last()?, Some((b"key_c".into(), b"val_c".into())));
@@ -120,7 +120,7 @@ fn sled_tree_overlay_last() -> Result<(), sled::Error> {
     // Initialize tree and its overlay
     let tree = db.open_tree(TREE_1)?;
     let mut overlay = SledTreeOverlay::new(&tree);
-    assert!(overlay.is_empty());
+    assert!(overlay.is_empty()?);
 
     // Check last is None
     assert_eq!(overlay.last()?, None);

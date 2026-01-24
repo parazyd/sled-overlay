@@ -36,7 +36,7 @@ fn sled_tree_overlay_state() -> Result<(), sled::Error> {
     let tree = db.open_tree(TREE)?;
     tree.insert(b"key_a", b"val_a")?;
     let mut overlay = SledTreeOverlay::new(&tree);
-    assert!(!overlay.is_empty());
+    assert!(!overlay.is_empty()?);
 
     // Make a vector to keep track of changes
     let mut sequence = vec![];
@@ -209,7 +209,7 @@ fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
     let tree = db.open_tree(TREE)?;
     tree.insert(b"key_a", b"val_a")?;
     let mut overlay = SledTreeOverlay::new(&tree);
-    assert!(!overlay.is_empty());
+    assert!(!overlay.is_empty()?);
 
     // Make two vectors to keep track of changes
     let mut sequence = vec![];
@@ -233,7 +233,7 @@ fn sled_tree_overlay_rebuild_state() -> Result<(), sled::Error> {
     // Create a different overlay to rebuild
     // the previous one using the changes sequence
     let mut overlay2 = SledTreeOverlay::new(&tree);
-    assert!(!overlay2.is_empty());
+    assert!(!overlay2.is_empty()?);
 
     // Add each diff from the sequence and verify
     // overlay has been mutated accordingly
@@ -385,7 +385,7 @@ fn sled_tree_overlay_clear_state() -> Result<(), sled::Error> {
     let tree = db.open_tree(TREE)?;
     tree.insert(b"key_a", b"val_a")?;
     let mut overlay = SledTreeOverlay::new(&tree);
-    assert!(!overlay.is_empty());
+    assert!(!overlay.is_empty()?);
 
     // Make a vector to keep track of changes
     let mut sequence = vec![];

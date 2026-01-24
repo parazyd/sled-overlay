@@ -333,7 +333,7 @@ impl SledTreeOverlay {
     }
 
     /// Returns `true` if the overlay is empty.
-    pub fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> Result<bool, sled::Error> {
         // Keep a counter of all elements
         let mut counter: i64 = 0;
 
@@ -341,12 +341,16 @@ impl SledTreeOverlay {
         counter += self.tree.len() as i64;
 
         // Add new keys
-        counter += self.state.cache.len() as i64;
+        for key in self.state.cache.keys() {
+            if !self.tree.contains_key(key)? {
+                counter += 1;
+            }
+        }
 
         // Subtract removed keys
         counter -= self.state.removed.len() as i64;
 
-        counter <= 0
+        Ok(counter <= 0)
     }
 
     /// Returns last key and value from the overlay or `None` if its empty,

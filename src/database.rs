@@ -619,7 +619,7 @@ impl SledDbOverlay {
     /// Returns `true` if specified tree cache is empty.
     pub fn is_empty(&self, tree_key: &[u8]) -> Result<bool, sled::Error> {
         let cache = self.get_cache(&tree_key.into())?;
-        Ok(cache.is_empty())
+        cache.is_empty()
     }
 
     /// Returns last value from the overlay if the specified tree cache is not empty.
