@@ -141,7 +141,7 @@ impl SledTreeOverlayStateDiff {
         // Set inserted keys
         for (key, value) in state.cache.iter() {
             // Grab each key previous value, if it existed
-            let previous = tree.get::<IVec>(key.into())?;
+            let previous = tree.get(key)?;
             cache.insert(key.into(), (previous, value.into()));
         }
 
@@ -320,12 +320,13 @@ impl SledTreeOverlay {
     /// Returns `true` if the overlay contains a value for a specified key.
     pub fn contains_key(&self, key: &[u8]) -> Result<bool, sled::Error> {
         // First check if the key was removed in the overlay
-        if self.state.removed.contains::<IVec>(&key.into()) {
+        let key = IVec::from(key);
+        if self.state.removed.contains(&key) {
             return Ok(false);
         }
 
         // Then check the cache and the main tree
-        if self.state.cache.contains_key::<IVec>(&key.into()) || self.tree.contains_key(key)? {
+        if self.state.cache.contains_key(&key) || self.tree.contains_key(key)? {
             return Ok(true);
         }
 
@@ -428,12 +429,13 @@ impl SledTreeOverlay {
     /// Retrieve a value from the overlay if it exists.
     pub fn get(&self, key: &[u8]) -> Result<Option<IVec>, sled::Error> {
         // First check if the key was removed in the overlay
-        if self.state.removed.contains::<IVec>(&key.into()) {
+        let key = IVec::from(key);
+        if self.state.removed.contains(&key) {
             return Ok(None);
         }
 
         // Then check the cache
-        if let Some(v) = self.state.cache.get::<IVec>(&key.into()) {
+        if let Some(v) = self.state.cache.get(&key) {
             return Ok(Some(v.clone()));
         }
 
@@ -449,8 +451,9 @@ impl SledTreeOverlay {
 
         // In case this key was previously removed from the cache, we have to
         // delete it from the `removed` set.
-        if self.state.removed.contains::<IVec>(&key.into()) {
-            self.state.removed.remove(key);
+        let key = IVec::from(key);
+        if self.state.removed.contains(&key) {
+            self.state.removed.remove(&key);
             // And in that case, a previous value isn't supposed to exist
             return Ok(None);
         }
@@ -458,7 +461,7 @@ impl SledTreeOverlay {
         // If cache didn't contain this key previously, and it wasn't removed
         // either, then check if it's in the main tree.
         if prev.is_none() {
-            prev = self.tree.get::<IVec>(key.into())?;
+            prev = self.tree.get(key)?;
         }
 
         Ok(prev)
@@ -467,24 +470,25 @@ impl SledTreeOverlay {
     /// Delete a value, if it exists, returning the old value.
     pub fn remove(&mut self, key: &[u8]) -> Result<Option<IVec>, sled::Error> {
         // If it was previously removed, we can just return None
-        if self.state.removed.contains::<IVec>(&key.into()) {
+        let key = IVec::from(key);
+        if self.state.removed.contains(&key) {
             return Ok(None);
         }
 
         // Attempt to remove from cache, and if it wasn't in the cache before,
         // we have to get the previous value from the sled tree:
-        let mut prev: Option<IVec> = self.state.cache.remove::<IVec>(&key.into());
+        let mut prev: Option<IVec> = self.state.cache.remove(&key);
         if prev.is_none() {
-            prev = self.tree.get(key)?;
+            prev = self.tree.get(&key)?;
         }
 
         // Previous value must existed
         if prev.is_none() {
-            return Err(sled::Error::CollectionNotFound(key.into()));
+            return Err(sled::Error::CollectionNotFound(key));
         }
 
         // Mark the key as removed
-        self.state.removed.insert(key.into());
+        self.state.removed.insert(key);
 
         Ok(prev)
     }
