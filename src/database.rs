@@ -438,6 +438,13 @@ impl SledDbOverlayStateDiff {
             self.dropped_trees.remove(key);
         }
     }
+
+    /// Auxilliary function to retrieve our newly opened trees.
+    pub fn new_trees(&self) -> Vec<IVec> {
+        let mut new_trees: Vec<IVec> = self.caches.keys().cloned().collect();
+        new_trees.retain(|tree| !self.initial_tree_names.contains(tree));
+        new_trees
+    }
 }
 
 /// An overlay on top of an entire [`sled::Db`] which can span multiple trees
