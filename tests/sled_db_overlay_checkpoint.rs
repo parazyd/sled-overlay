@@ -79,7 +79,10 @@ fn sled_db_overlay_checkpoint() -> Result<(), sled::Error> {
     overlay.open_tree(NEW_TREE, false)?;
 
     // We assume something went wrong, so we revert to last checkpoint
-    overlay.revert_to_checkpoint()?;
+    overlay.revert_to_checkpoint();
+
+    // And drop the new tree we created
+    db.drop_tree(NEW_TREE)?;
 
     // Now execute all tree batches in the overlay
     assert_eq!(overlay.apply(), Ok(()));

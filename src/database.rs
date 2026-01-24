@@ -705,22 +705,10 @@ impl SledDbOverlay {
         self.checkpoint = self.state.clone();
     }
 
-    /// Revert to current cache state checkpoint.
-    pub fn revert_to_checkpoint(&mut self) -> Result<(), sled::Error> {
-        // We first check if any new trees were opened, so we can remove them.
-        let new_trees: Vec<_> = self
-            .state
-            .new_tree_names
-            .iter()
-            .filter(|tree| !self.checkpoint.new_tree_names.contains(tree))
-            .collect();
-        for tree in &new_trees {
-            self.db.drop_tree(tree)?;
-        }
-
+    /// Revert to current cache state checkpoint. This function will
+    /// not drop new trees from the `db`, so caller should handle it.
+    pub fn revert_to_checkpoint(&mut self) {
         self.state = self.checkpoint.clone();
-
-        Ok(())
     }
 
     /// Calculate differences from provided overlay state changes
