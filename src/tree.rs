@@ -69,6 +69,10 @@ impl SledTreeOverlayState {
     pub fn add_diff(&mut self, diff: &SledTreeOverlayStateDiff) {
         // Add all new keys into cache
         for (k, v) in diff.cache.iter() {
+            // Skip if it didn't exist
+            if v.1.is_empty() {
+                continue;
+            }
             self.removed.remove(k);
             self.cache.insert(k.clone(), v.1.clone());
         }
