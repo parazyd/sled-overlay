@@ -266,14 +266,13 @@ pub struct SledDbOverlayStateDiff {
 
 impl SledDbOverlayStateDiff {
     /// Instantiate a new [`SledDbOverlayStateDiff`], over the provided
-    /// [`SledDbOverlayState`]. For newlly opened trees, all removed
-    /// keys are ignored. New trees that get droped are also ignored.
+    /// [`SledDbOverlayState`].
     pub fn new(state: &SledDbOverlayState) -> Result<Self, sled::Error> {
         let mut caches = BTreeMap::new();
         let mut dropped_trees = BTreeMap::new();
 
         for (key, cache) in state.caches.iter() {
-            let mut diff = cache.diff(&[])?;
+            let diff = cache.diff(&[])?;
 
             // Skip if diff is empty for an existing tree
             if diff.cache.is_empty()
@@ -281,11 +280,6 @@ impl SledDbOverlayStateDiff {
                 && !state.new_tree_names.contains(key)
             {
                 continue;
-            }
-
-            // Ignore all dropped keys of new trees
-            if state.new_tree_names.contains(key) {
-                diff.removed = BTreeMap::new();
             }
 
             caches.insert(key.clone(), (diff, false));

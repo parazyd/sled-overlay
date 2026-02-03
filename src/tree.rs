@@ -142,6 +142,10 @@ impl SledTreeOverlayStateDiff {
         for (key, value) in state.cache.iter() {
             // Grab each key previous value, if it existed
             let previous = tree.get(key)?;
+
+            // If value is unchanged, consider it a reinsert
+            let previous = previous.filter(|previous| previous != value);
+
             cache.insert(key.into(), (previous, value.into()));
         }
 
@@ -273,7 +277,7 @@ impl SledTreeOverlayStateDiff {
         }
 
         for k in other.removed.keys() {
-            // Update cache key previous, if it exits
+            // Update cache key previous, if it exists
             if let Some(values) = self.cache.get(k) {
                 self.cache.insert(k.clone(), (None, values.1.clone()));
                 continue;
